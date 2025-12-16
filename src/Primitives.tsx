@@ -8,17 +8,17 @@ function Primitives() {
         <article className="post-text">
           <h1>Primitives</h1>
           <p>
-            1. Complexity is grown from an initial set of primitives and some
-            scaling process.
+            1. Complexity <i>grows</i> from an initial set of primitives and
+            some scaling process.
           </p>
           <p>
-            2. Aligned growth comes from relentlessly pruning unnecessary
-            complexity and scaling the right set of primitives.
+            2. Problem-solving is maintenance. Solutions that prune unnecessary
+            complexity tend to be both beautiful and good.
           </p>
           <p>
-            3. Unhealthy complexity is both ugly and evil. Solutions that prune
-            unnecessary complexity tend not only to be elegant, but also deeply{" "}
-            <i>good</i>.
+            3. Healthy, curated, aligned and maximal growth is the dance between
+            scaling the right set of initial primitives and relentlessly pruning
+            unnecessary complexity.
           </p>
         </article>
         <Link to="/" className="dot-post" aria-label="Home" />
