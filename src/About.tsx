@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import "./About.css";
+import { ThemeToggle } from "./ThemeToggle";
 
 function About() {
   return (
@@ -12,6 +13,7 @@ function About() {
         </div>
         <Link to="/" className="dot-about" aria-label="Home" />
       </div>
+      <ThemeToggle />
     </main>
   );
 }

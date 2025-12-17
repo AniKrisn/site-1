@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
+import { ThemeToggle } from "./ThemeToggle";
 
 function Specificity() {
   return (
@@ -29,6 +30,7 @@ function Specificity() {
         </article>
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
+      <ThemeToggle />
     </main>
   );
 }

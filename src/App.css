@@ -27,7 +27,7 @@
 .post-link {
   font-family: "Geist Mono", monospace;
   font-size: 0.95rem;
-  color: #2a2a2a;
+  color: var(--color-text);
   text-decoration: none;
   transition: opacity 0.2s ease;
 }

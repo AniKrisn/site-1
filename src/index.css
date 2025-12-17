@@ -1,3 +1,13 @@
+:root {
+  --color-bg: #faf3e1;
+  --color-text: #222222;
+}
+
+[data-theme="dark"] {
+  --color-bg: #222222;
+  --color-text: #faf3e1;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,10 +16,41 @@
 
 html,
 body {
-  background-color: #fcf9ea;
+  background-color: var(--color-bg);
+  color: var(--color-text);
   min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
   min-height: 100vh;
+}
+
+.dot-corner {
+  position: fixed;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--color-text);
+  top: 24px;
+  right: 24px;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s ease, background-color 0.2s ease;
+}
+
+.dot-corner:hover {
+  transform: scale(1.2);
+}
+
+.dot-corner:focus {
+  outline: none;
+}
+
+@media (max-width: 768px) {
+  .dot-corner {
+    top: auto;
+    bottom: 24px;
+    right: 24px;
+  }
 }

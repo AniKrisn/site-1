@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import "./App.css";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface Post {
   title: string;
@@ -24,6 +25,7 @@ function App() {
         </nav>
         <Link to="/about" className="dot" aria-label="About" />
       </div>
+      <ThemeToggle />
     </main>
   );
 }
