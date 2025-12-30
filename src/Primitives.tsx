@@ -13,8 +13,8 @@ function Primitives() {
             some scaling process.
           </p>
           <p>
-            2. Problem-solving is maintenance. Solutions that prune unnecessary
-            complexity tend to be both beautiful and good.
+            2. Problem-solving is maintenance; solutions prune unnecessary
+            complexity.
           </p>
           <p>
             3. Healthy, curated, aligned and maximal growth is the dance between

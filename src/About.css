@@ -1,8 +1,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap");
 
+.container {
+  position: relative;
+}
+
 .about-content {
   flex-direction: column;
   align-items: flex-end;
+  position: relative;
+  z-index: 1;
 }
 
 .about-text {
