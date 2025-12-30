@@ -17,8 +17,9 @@ function Descriptions() {
             3. Prescriptions tend to be heavy, descriptions tend to be light.
           </p>
           <p>
-            4. Humility expands the possibility space and invites exploration.
-            Hubris confines the possibility space and defuses imagination.
+            4. Prescriptions confine the possibility space and defuse
+            imagination. Descriptions expand the possibility space and invite
+            exploration.
           </p>
           <p>5. Teaching doesn't exist but learning does.</p>
         </article>
