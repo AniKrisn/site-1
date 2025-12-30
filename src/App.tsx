@@ -8,8 +8,8 @@ interface Post {
 }
 
 const posts: Post[] = [
-  { title: "Specificity", slug: "/specificity" },
   { title: "Primitives", slug: "/primitives" },
+  { title: "Specificity", slug: "/specificity" },
   { title: "Descriptions", slug: "/descriptions" },
 ];
 
