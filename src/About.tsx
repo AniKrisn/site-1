@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import "./About.css";
 import { ThemeToggle } from "./ThemeToggle";
-import { Polypaths } from "./Polypaths";
 
 function About() {
   return (

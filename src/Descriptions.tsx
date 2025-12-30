@@ -17,9 +17,8 @@ function Descriptions() {
             3. Prescriptions tend to be heavy, descriptions tend to be light.
           </p>
           <p>
-            4. Epistemic humility invites exploration. Hubris on the other hand
-            is a burden, it confines the possibility space and culls imagination
-            and creativity.
+            4. Humility expands the possibility space and invites exploration.
+            Hubris confines the possibility space and defuses imagination.
           </p>
           <p>5. Teaching doesn't exist but learning does.</p>
         </article>
