@@ -11,7 +11,6 @@ const posts: Post[] = [
   { title: "Primitives", slug: "/primitives" },
   { title: "Specificity", slug: "/specificity" },
   { title: "Descriptions", slug: "/descriptions" },
-  { title: "Eggs", slug: "/eggs" },
 ];
 
 function App() {

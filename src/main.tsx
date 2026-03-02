@@ -7,7 +7,7 @@ import About from "./About.tsx";
 import Specificity from "./Specificity.tsx";
 import Primitives from "./Primitives.tsx";
 import Descriptions from "./Descriptions.tsx";
-import Eggs from "./Eggs.tsx";
+
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -18,7 +18,7 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/primitives" element={<Primitives />} />
         <Route path="/specificity" element={<Specificity />} />
         <Route path="/descriptions" element={<Descriptions />} />
-        <Route path="/eggs" element={<Eggs />} />
+
       </Routes>
     </BrowserRouter>
   </StrictMode>
