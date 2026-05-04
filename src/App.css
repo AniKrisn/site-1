@@ -18,10 +18,27 @@
   gap: 1.5rem;
 }
 
-.posts {
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.posts,
+.projects-list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.section-title {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text);
+  opacity: 0.5;
+  margin-bottom: 0.5rem;
+  text-transform: lowercase;
 }
 
 .post-link {
