@@ -7,14 +7,22 @@ interface LinkItem {
   slug: string;
 }
 
+interface ProjectItem extends LinkItem {
+  mobileHref?: string;
+}
+
 const posts: LinkItem[] = [
   { title: "Primitives", slug: "/primitives" },
   { title: "Specificity", slug: "/specificity" },
   { title: "Descriptions", slug: "/descriptions" },
 ];
 
-const projects: LinkItem[] = [
-  { title: "Code editor", slug: "/code-editor/" },
+const projects: ProjectItem[] = [
+  {
+    title: "Code editor",
+    slug: "/code-editor/",
+    mobileHref: "https://github.com/AniKrisn/code-editor/",
+  },
 ];
 
 function App() {
@@ -33,9 +41,21 @@ function App() {
             <h2 className="section-title">Projects</h2>
             <nav className="projects-list">
               {projects.map((project) => (
-                <a key={project.slug} href={project.slug} className="post-link">
-                  {project.title}
-                </a>
+                <span key={project.slug} className="project-link-wrap">
+                  <a href={project.slug} className="post-link post-link-desktop">
+                    {project.title}
+                  </a>
+                  {project.mobileHref && (
+                    <a
+                      href={project.mobileHref}
+                      className="post-link post-link-mobile"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {project.title}
+                    </a>
+                  )}
+                </span>
               ))}
             </nav>
           </section>

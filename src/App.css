@@ -21,7 +21,7 @@
 .sections {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 2.5rem;
 }
 
 .posts,
@@ -51,6 +51,24 @@
 
 .post-link:hover {
   opacity: 0.5;
+}
+
+.project-link-wrap {
+  display: contents;
+}
+
+.post-link-mobile {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .post-link-desktop {
+    display: none;
+  }
+
+  .post-link-mobile {
+    display: inline;
+  }
 }
 
 .dot {
