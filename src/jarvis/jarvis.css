@@ -1,0 +1,24 @@
+@keyframes jarvis-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.5;
+		transform: scale(0.85);
+	}
+}
+
+/* Allow the cursor-chat bubble to wrap vertically — by default tldraw uses
+ * white-space: nowrap which forces a single line that's clipped. We let
+ * Jarvis's bubble grow to a few lines so longer phrases stay readable. */
+.tl-nametag-chat {
+	white-space: normal !important;
+	max-width: 280px;
+	min-height: unset;
+	line-height: 1.35;
+	word-break: break-word;
+	overflow: visible !important;
+	text-overflow: clip !important;
+}

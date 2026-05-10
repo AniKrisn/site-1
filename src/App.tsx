@@ -23,6 +23,7 @@ const projects: ProjectItem[] = [
     slug: "/code-editor/",
     mobileHref: "https://github.com/AniKrisn/code-editor/",
   },
+  { title: "Jarvis", slug: "/jarvis" },
 ];
 
 function App() {

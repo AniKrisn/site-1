@@ -7,6 +7,7 @@ import About from "./About.tsx";
 import Specificity from "./Specificity.tsx";
 import Primitives from "./Primitives.tsx";
 import Descriptions from "./Descriptions.tsx";
+import Jarvis from "./jarvis/Jarvis.tsx";
 
 
 createRoot(document.getElementById("root")!).render(
@@ -18,6 +19,7 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/primitives" element={<Primitives />} />
         <Route path="/specificity" element={<Specificity />} />
         <Route path="/descriptions" element={<Descriptions />} />
+        <Route path="/jarvis" element={<Jarvis />} />
 
       </Routes>
     </BrowserRouter>
