@@ -10,6 +10,12 @@ const GEMINI_LIVE_WS_URL =
 const GEMINI_URL =
 	'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent'
 
+// gemini-3-flash-preview — same model the heavy agent uses. Cheap, fast,
+// and reliable. Google didn't release a plain "gemini-3.1-flash"; the
+// blog-post 3.1 model is Pro, which is ~5x the per-token cost.
+const GEMINI_31_FLASH_URL =
+	'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent'
+
 const QUIVER_URL = 'https://api.quiver.ai/v1/svgs/generations'
 
 /**
@@ -117,6 +123,52 @@ export function geminiProxy(): Plugin {
 						console.error(`[Gemini Live] client error:`, err)
 						upstream.close()
 					})
+				})
+			})
+
+			// Register the 3.1-flash route BEFORE the generic /api/gemini one
+			// so prefix matching doesn't fall through.
+			server.middlewares.use('/api/gemini/3.1-flash', (req, res) => {
+				if (req.method !== 'POST') {
+					res.statusCode = 405
+					res.end('Method not allowed')
+					return
+				}
+				if (!apiKey) {
+					res.statusCode = 403
+					res.setHeader('Content-Type', 'application/json')
+					res.end(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }))
+					return
+				}
+				const chunks: Buffer[] = []
+				req.on('data', (chunk: Buffer) => chunks.push(chunk))
+				req.on('end', async () => {
+					try {
+						const body = Buffer.concat(chunks).toString()
+						const start = Date.now()
+						const upstream = await fetch(`${GEMINI_31_FLASH_URL}?key=${apiKey}`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body,
+						})
+						const data = await upstream.text()
+						const elapsed = Date.now() - start
+						if (upstream.ok) {
+							console.log(`[Gemini 3.1 Flash] ◀ ${elapsed}ms | OK`)
+						} else {
+							console.error(
+								`[Gemini 3.1 Flash] ◀ ${elapsed}ms | ${upstream.status}: ${data.slice(0, 200)}`
+							)
+						}
+						res.statusCode = upstream.status
+						res.setHeader('Content-Type', 'application/json')
+						res.end(data)
+					} catch (err) {
+						console.error(`[Gemini 3.1 Flash] ◀ proxy error:`, err)
+						res.statusCode = 502
+						res.setHeader('Content-Type', 'application/json')
+						res.end(JSON.stringify({ error: String(err) }))
+					}
 				})
 			})
 

@@ -1,18 +1,25 @@
 /**
- * LiveVoiceController — push-to-talk that uses browser WebSpeech for STT,
- * Gemini Live for spoken output, and the heavy canvas agent for canvas work.
+ * LiveVoiceController — push-to-talk that uses browser WebSpeech for STT
+ * and Gemini Live for spoken output + intent routing.
  *
- * Hold "M" to talk. On release we get the final transcript and:
- *   1. Send it to Live → primer plays (~3-4s)
- *   2. Dispatch to the heavy canvas agent (in parallel)
- *   3. When the heavy agent returns, narrate(speech) — buffered until Live's
- *      primer finishes so we don't interrupt mid-sentence.
+ * Flow per turn:
+ *   1. Hold M → WebSpeech listens
+ *   2. Release M → final transcript
+ *   3. Send transcript to Live as a user turn
+ *   4. Live decides which tool to call (draw, come_here, draw_random,
+ *      redraw_last, list_drawings, answer_with_canvas) — or just talks
+ *      back if no tool fits
+ *   5. We dispatch the tool to the agent and return any result Live
+ *      should see
+ *   6. Live continues speaking accordingly
+ *
+ * No client-side regex matching for intent — Live owns that decision.
  */
 
 import { useCallback, useEffect, useRef } from 'react'
 import type { IntelligentCanvasAgent } from '../agent/IntelligentCanvasAgent'
-import { drawCache } from '../lib/draw-cache'
-import { GeminiLiveSession, type LiveStatus } from './GeminiLiveSession'
+import { drawCache, type DrawQuality } from '../lib/draw-cache'
+import { GeminiLiveSession, type LiveStatus, type LiveToolCall } from './GeminiLiveSession'
 
 interface SpeechRecognitionEvent {
 	results: { [index: number]: { [index: number]: { transcript: string } } }
@@ -48,23 +55,18 @@ export function LiveVoiceController({
 }: LiveVoiceControllerProps) {
 	const sessionRef = useRef<GeminiLiveSession | null>(null)
 	const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-	// Last successfully-drawn subject. Used to handle "do that again"-style
-	// follow-ups without re-running the heavy agent.
-	const lastDrawSubjectRef = useRef<string | null>(null)
+	// Memory of the last successful draw — Live's redraw_last tool reads this.
+	const lastDrawRef = useRef<{ subject: string; quality: DrawQuality } | null>(null)
 
 	// Create the Live session once and warm up the WebSocket so the first
 	// utterance doesn't pay the ~6s setup-handshake cost.
 	useEffect(() => {
 		const session = new GeminiLiveSession({
-			onStatusChange: (status, message) => {
-				onStatus?.(status, message)
-			},
-			onModelTranscript: (text) => {
-				console.log(`[Live] model said: ${text}`)
-			},
+			onStatusChange: (status, message) => onStatus?.(status, message),
+			onModelTranscript: (text) => console.log(`[Live] model said: ${text}`),
+			onToolCall: async (call) => handleToolCall(call, agentRef, lastDrawRef, sessionRef),
 		})
 		sessionRef.current = session
-		// Best-effort eager connect — ignore failures, retry lazily on first use.
 		session.connect().catch((err) => console.warn('[Live] eager connect failed', err))
 
 		return () => {
@@ -77,89 +79,13 @@ export function LiveVoiceController({
 	const handleTranscript = useCallback(
 		async (text: string) => {
 			const session = sessionRef.current
-			const agent = agentRef.current
-			if (!session || !agent) return
+			if (!session) return
 
 			console.log(`[Voice] transcript: "${text}"`)
-
-			// In case the eager connect hasn't completed yet.
 			await session.connect().catch(() => {})
-
-			// "Come over here" — silent action, no Live, no heavy. Just move
-			// Jarvis's cursor to the user's pointer.
-			if (isComeHereCommand(text)) {
-				console.log(`[Voice] come-here intent — moving cursor`)
-				agent.comeHere()
-				return
-			}
-
-			// "What have you drawn?" — answer from the cache, no Quiver, no agent.
-			if (isMemoryQuery(text)) {
-				const subjects = drawCache.listSubjects()
-				const memoryReply =
-					subjects.length === 0
-						? "I haven't drawn anything yet — ask me to draw something first."
-						: subjects.length === 1
-							? `So far, just ${subjects[0]}.`
-							: `So far I've drawn ${formatList(subjects)}.`
-				console.log(`[Voice] memory query → ${subjects.length} cached`)
-				// Frame as a user request asking Live to read out the answer.
-				session.sendUserText(
-					`The user asked what you've drawn so far. Reply briefly with: "${memoryReply}"`
-				)
-				return
-			}
-
-			// "Draw something / anything / whatever / surprise me" — no
-			// subject given. Render a hardcoded preset instantly.
-			if (isDrawSomething(text)) {
-				console.log(`[Voice] draw-something path → preset`)
-				session.sendUserText(text)
-				void agent.drawSomething()
-				return
-			}
-
-			// Drawing intent — skip the heavy agent entirely. Either pull the
-			// new subject out of the phrase, or treat "again"-style follow-ups
-			// as a re-draw of the last subject.
-			let drawSubject = parseDrawSubject(text)
-			if (!drawSubject && isRedrawAgain(text) && lastDrawSubjectRef.current) {
-				drawSubject = lastDrawSubjectRef.current
-				console.log(`[Voice] redraw-again → reusing "${drawSubject}"`)
-			}
-			if (drawSubject) {
-				console.log(`[Voice] draw-only path → "${drawSubject}"`)
-				lastDrawSubjectRef.current = drawSubject
-				session.sendUserText(text)
-				void agent.drawDirectly(drawSubject)
-				return
-			}
-
-			// 1. Live primer (text in → audio out)
 			session.sendUserText(text)
-
-			// 2. Heavy agent in parallel. We defer the camera tour so it fires
-			// the moment Live actually starts speaking the depth answer — that
-			// way the camera moves match the words, not the silent transition.
-			const t0 = performance.now()
-			void agent.handleVoiceCommand(text, {
-				silent: true,
-				deferCameraTour: true,
-				onResult: (result) => {
-					const elapsed = Math.round(performance.now() - t0)
-					console.log(
-						`[Heavy] finished in ${elapsed}ms, speech len=${result.speech.length}, items=${result.canvasItems.length}`
-					)
-					if (result.speech) {
-						sessionRef.current?.narrate(result.speech, () => {
-							// Narration audio just started — kick off camera tour.
-							result.runCameraTour()
-						})
-					}
-				},
-			})
 		},
-		[agentRef]
+		[]
 	)
 
 	const startRecognition = useCallback(() => {
@@ -168,7 +94,6 @@ export function LiveVoiceController({
 			console.warn('[Voice] webkitSpeechRecognition not supported in this browser')
 			return
 		}
-		// If something's already listening, ignore — keypress repeat or jitter.
 		if (recognitionRef.current) return
 
 		const recognition = new window.webkitSpeechRecognition()
@@ -196,7 +121,6 @@ export function LiveVoiceController({
 
 	const stopRecognition = useCallback(() => {
 		recognitionRef.current?.stop()
-		// onend will null out the ref and fire onRecordingChange(false).
 	}, [])
 
 	useEffect(() => {
@@ -215,10 +139,6 @@ export function LiveVoiceController({
 			if (e.key !== 'm' && e.key !== 'M') return
 			if (inEditableTarget(e.target)) return
 			e.preventDefault()
-			// Critical: prime/resume the output AudioContext on the user
-			// gesture. If we wait until audio chunks arrive (~6s+ later for
-			// the first session due to setup handshake), the autoplay policy
-			// keeps the context suspended and you hear nothing.
 			sessionRef.current?.primeAudio()
 			startRecognition()
 		}
@@ -238,100 +158,86 @@ export function LiveVoiceController({
 }
 
 /**
- * Look for a draw-intent verb anywhere in the transcript and pull the noun
- * phrase that follows it. Returns null if no draw verb appears, or if no
- * usable subject can be extracted. We use this to bypass the heavyweight
- * agent entirely for drawing requests — the agent's research pipeline isn't
- * needed to render a Quiver SVG, and running it adds Wikipedia text/images
- * that aren't wanted.
+ * Dispatch a tool call from Live to the right agent method. Returns a
+ * value Live will see in the function-response. For fire-and-forget
+ * actions we just acknowledge; for query-style tools (list_drawings) we
+ * return the data.
  */
-function parseDrawSubject(text: string): string | null {
-	// Match "<verb> [me] [a|an|the] <subject>" anywhere in the sentence.
-	// Subject ends at the next clause boundary (please/now/again/then/and),
-	// punctuation, or end of string.
-	const re =
-		/(?:draw|sketch|illustrate|paint|doodle|render)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|some\s+)?([a-zA-Z][a-zA-Z\s'-]{0,60}?)(?=\s+(?:please|now|again|too|also|then|and)\b|[?.!,]|$)/i
-	const match = text.match(re)
-	if (!match) return null
-	const subject = match[1].trim()
-	if (!subject || subject.length < 2) return null
-	return subject
-}
+async function handleToolCall(
+	call: LiveToolCall,
+	agentRef: React.MutableRefObject<IntelligentCanvasAgent | null>,
+	lastDrawRef: React.MutableRefObject<{ subject: string; quality: DrawQuality } | null>,
+	sessionRef: React.MutableRefObject<GeminiLiveSession | null>
+): Promise<Record<string, unknown>> {
+	const agent = agentRef.current
+	if (!agent) return { ok: false, error: 'agent not ready' }
 
-/**
- * Detect "come over here" / "come to me" / "fly over" / "follow me" /
- * "where are you" style commands that should move Jarvis's cursor to the
- * user's pointer without any voice response. Broad matcher — the user
- * might phrase this many ways.
- */
-function isComeHereCommand(text: string): boolean {
-	const t = text.toLowerCase().trim()
-	// "come/fly/drift/move/get/head over here / to me / closer"
-	if (
-		/\b(come|fly|drift|float|move|get|head)\s+(on\s+)?(over\s+)?(here|to\s+me|to\s+my\s+(cursor|pointer|mouse|side)|closer)\b/.test(
-			t
-		)
-	)
-		return true
-	// "over here, jarvis" / "jarvis, over here"
-	if (/\bover\s+here\b/.test(t)) return true
-	// "follow me" / "follow my cursor"
-	if (/\bfollow\s+(me|my\s+(cursor|pointer|mouse))\b/.test(t)) return true
-	// "where are you" / "where'd you go"
-	if (/\bwhere\s+(are\s+you|did\s+you\s+go|'?d\s+you\s+go)\b/.test(t)) return true
-	// "get back here" / "get over here"
-	if (/\bget\s+(back|over)\s+here\b/.test(t)) return true
-	return false
-}
+	console.log(`[Voice] tool: ${call.name}(${JSON.stringify(call.args)})`)
 
-/**
- * Detect "draw something / anything / whatever / surprise me" phrasings —
- * the user wants Jarvis to draw but isn't specifying what. We render a
- * hardcoded preset SVG instead of asking Quiver for "something".
- */
-function isDrawSomething(text: string): boolean {
-	const t = text.toLowerCase().trim()
-	return (
-		/\b(draw|sketch|illustrate|paint|doodle)\s+(?:me\s+)?(?:something|anything|whatever)\b/.test(
-			t
-		) ||
-		/\bsurprise\s+me\b/.test(t) ||
-		/\b(draw|sketch)\s+(?:me\s+)?(?:a\s+)?random\b/.test(t)
-	)
-}
+	switch (call.name) {
+		case 'draw': {
+			const subject = String(call.args.subject ?? '').trim()
+			const rawQuality = String(call.args.quality ?? 'fast').toLowerCase()
+			const quality: DrawQuality = rawQuality === 'high' ? 'high' : 'fast'
+			if (!subject) return { ok: false, error: 'no subject given' }
+			lastDrawRef.current = { subject, quality }
+			void agent.drawDirectly(subject, quality)
+			return { ok: true, status: 'started', subject, quality }
+		}
 
-/**
- * Detect "do it again"-style follow-up phrasings that imply re-drawing the
- * previous subject without naming it explicitly.
- */
-function isRedrawAgain(text: string): boolean {
-	const t = text.toLowerCase()
-	return /\b(again|same\s+(thing|one|svg|drawing|sketch|fish)|once more|redo|do that)\b/.test(t)
-}
+		case 'come_here': {
+			agent.comeHere()
+			return { ok: true }
+		}
 
-/**
- * Detect "what have you drawn / what can you draw / what's in your sketchbook"
- * style memory-query phrasings. Used to short-circuit straight to a cache
- * read instead of going through Quiver or the heavy agent.
- */
-function isMemoryQuery(text: string): boolean {
-	const t = text.toLowerCase().trim()
-	if (!/\b(draw|drawn|drawings|sketch|sketches|sketchbook)\b/.test(t)) return false
-	return (
-		/\bwhat\s+(have|'?ve|do|can)\s+you\b/.test(t) ||
-		/\bwhat\s+(are|'?re)\s+the\s+(things|drawings|sketches)\b/.test(t) ||
-		/\b(check|see|show|list|tell\s+me)\s+(your|the)\s+(memory|sketchbook|drawings|cache)\b/.test(
-			t
-		) ||
-		/\bdo\s+you\s+(remember|know\s+how\s+to\s+draw)\b/.test(t) ||
-		/\bwhat\s+can\s+you\s+already\s+draw\b/.test(t)
-	)
-}
+		case 'draw_random': {
+			void agent.drawSomething()
+			return { ok: true, status: 'started' }
+		}
 
-/** Join an array as "a, b, and c" / "a and b" / "a". */
-function formatList(items: string[]): string {
-	if (items.length === 0) return ''
-	if (items.length === 1) return items[0]
-	if (items.length === 2) return `${items[0]} and ${items[1]}`
-	return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1]
+		case 'redraw_last': {
+			const last = lastDrawRef.current
+			if (!last) return { ok: false, error: 'nothing drawn yet' }
+			void agent.drawDirectly(last.subject, last.quality)
+			return { ok: true, status: 'started', subject: last.subject, quality: last.quality }
+		}
+
+		case 'list_drawings': {
+			const subjects = drawCache.listSubjects()
+			return {
+				ok: true,
+				count: subjects.length,
+				subjects,
+				summary:
+					subjects.length === 0
+						? "nothing drawn yet"
+						: subjects.length === 1
+							? `one drawing: ${subjects[0]}`
+							: `${subjects.length} drawings: ${subjects.join(', ')}`,
+			}
+		}
+
+		case 'answer_with_canvas': {
+			const intent = String(call.args.intent ?? '').trim()
+			if (!intent) return { ok: false, error: 'no intent' }
+			const t0 = performance.now()
+			void agent.handleVoiceCommand(intent, {
+				silent: true,
+				deferCameraTour: true,
+				onResult: (result) => {
+					const elapsed = Math.round(performance.now() - t0)
+					console.log(
+						`[Heavy] finished in ${elapsed}ms, speech len=${result.speech.length}, items=${result.canvasItems.length}`
+					)
+					if (result.speech) {
+						sessionRef.current?.narrate(result.speech, () => result.runCameraTour())
+					}
+				},
+			})
+			return { ok: true, status: 'delegated', intent }
+		}
+
+		default:
+			return { ok: false, error: `unknown tool: ${call.name}` }
+	}
 }

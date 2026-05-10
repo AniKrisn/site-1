@@ -8,8 +8,9 @@ import {
 	toRichText,
 } from 'tldraw'
 import type { JarvisCursor } from '../cursor/JarvisCursor'
-import { drawCache } from '../lib/draw-cache'
+import { drawCache, type DrawQuality } from '../lib/draw-cache'
 import { drawSvg } from '../lib/draw-svg'
+import { generateSvgViaGemini } from '../lib/draw-via-gemini'
 import type { FunctionDeclaration } from './api'
 
 /** Optional context handed to tool executors. */
@@ -101,7 +102,7 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
 	{
 		name: 'draw',
 		description:
-			"Draw a minimalist black-and-white line illustration of a subject on the canvas. The system uses a dedicated text-to-SVG model (QuiverAI) to generate Picasso-bull-style continuous-line art, then renders it with a hand-drawn animated reveal. You provide a brief subject description; the system handles all the styling. Use this whenever the user asks to draw, sketch, or illustrate something.",
+			"Draw a minimalist black-and-white line illustration of a subject on the canvas. By default uses Gemini 3.1 Flash for a fast Picasso-bull-style sketch (~2-4s); pass quality='high' to use the slower, higher-fidelity QuiverAI path (~30s, will animate-morph the rough Gemini result into the polished one). The system handles all styling — you provide a brief subject description.",
 		parameters: {
 			type: 'object',
 			properties: {
@@ -113,6 +114,12 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
 				width: {
 					type: 'number',
 					description: 'Render width in page pixels. Height auto-scales. Default 400.',
+				},
+				quality: {
+					type: 'string',
+					enum: ['fast', 'high'],
+					description:
+						"Optional. 'fast' (default) uses Gemini 3.1 Flash for a quick sketch. 'high' uses Quiver and runs a streaming morph from rough → polished. Use 'high' only when the user explicitly asks for high quality / fancy / nicely.",
 				},
 			},
 			required: ['subject'],
@@ -580,119 +587,9 @@ const QUIVER_STYLE_INSTRUCTIONS =
  * is the premium/slower variant; arrow-1 is older. */
 const QUIVER_MODEL = 'arrow-1.1'
 
-/** A continuous-line illustration is tiny — capping output well below the
- * 131k default shortens generation without affecting these prompts. */
-const QUIVER_MAX_OUTPUT_TOKENS = 4096
-
-/** Stream Quiver SSE; resolve with the first SVG (preferring the `draft`
- * preview event), and quietly upgrade `drawCache` to the final `content` SVG
- * once it arrives in the background. */
-async function streamQuiverSvg(
-	subject: string,
-	opts: { prompt: string; instructions: string; model: string }
-): Promise<string> {
-	const start = performance.now()
-	const response = await fetch('/api/quiver/generate', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-		body: JSON.stringify({
-			prompt: opts.prompt,
-			instructions: opts.instructions,
-			model: opts.model,
-			stream: true,
-			max_output_tokens: QUIVER_MAX_OUTPUT_TOKENS,
-		}),
-	})
-	if (!response.ok || !response.body) {
-		const errText = await response.text().catch(() => '')
-		throw new Error(`Quiver returned ${response.status}: ${errText.slice(0, 200)}`)
-	}
-
-	const reader = response.body.getReader()
-	const decoder = new TextDecoder()
-	let buf = ''
-
-	while (true) {
-		const { value, done } = await reader.read()
-		if (done) break
-		buf += decoder.decode(value, { stream: true })
-
-		let idx: number
-		while ((idx = buf.indexOf('\n\n')) !== -1) {
-			const raw = buf.slice(0, idx)
-			buf = buf.slice(idx + 2)
-			const evt = parseSseEvent(raw)
-			if (!evt?.svg) continue
-
-			if (evt.type === 'draft') {
-				console.log(
-					`[Voice] Quiver draft @ ${Math.round(performance.now() - start)}ms — rendering preview`
-				)
-				// Drain the rest in the background to capture the higher-fidelity
-				// content SVG and overwrite the cache.
-				consumeContentForCache(reader, decoder, buf, subject, start)
-				return evt.svg
-			}
-			if (evt.type === 'content') {
-				console.log(
-					`[Voice] Quiver content (no prior draft) @ ${Math.round(performance.now() - start)}ms`
-				)
-				drawCache.set(subject, evt.svg)
-				return evt.svg
-			}
-		}
-	}
-	throw new Error('Quiver stream ended with no SVG')
-}
-
-function consumeContentForCache(
-	reader: ReadableStreamDefaultReader<Uint8Array>,
-	decoder: TextDecoder,
-	initialBuf: string,
-	subject: string,
-	start: number
-): void {
-	void (async () => {
-		let buf = initialBuf
-		try {
-			while (true) {
-				const { value, done } = await reader.read()
-				if (done) break
-				buf += decoder.decode(value, { stream: true })
-				let idx: number
-				while ((idx = buf.indexOf('\n\n')) !== -1) {
-					const raw = buf.slice(0, idx)
-					buf = buf.slice(idx + 2)
-					const evt = parseSseEvent(raw)
-					if (evt?.type === 'content' && evt.svg) {
-						drawCache.set(subject, evt.svg)
-						console.log(
-							`[Voice] Quiver content cached for "${subject}" @ ${Math.round(performance.now() - start)}ms`
-						)
-					}
-				}
-			}
-		} catch {
-			// Background drain errors are non-fatal — preview already rendered.
-		}
-	})()
-}
-
-function parseSseEvent(raw: string): { type?: string; svg?: string } | null {
-	let event: string | undefined
-	let data = ''
-	for (const line of raw.split('\n')) {
-		if (line.startsWith('event:')) event = line.slice(6).trim()
-		else if (line.startsWith('data:')) data += line.slice(5).trim()
-	}
-	if (!data) return null
-	try {
-		const json = JSON.parse(data) as { type?: string; svg?: string }
-		return { type: json.type ?? event, svg: json.svg }
-	} catch {
-		return null
-	}
-}
+// (The previous in-file Quiver streaming helpers were superseded by
+// `lib/streaming-svg-parser.ts` and `lib/morph-orchestration.ts`, which
+// support the high-quality morph path.)
 
 async function executeDraw(
 	editor: Editor,
@@ -704,43 +601,57 @@ async function executeDraw(
 		return { success: false, message: 'draw requires a subject string.' }
 	}
 
+	const quality: DrawQuality = input.quality === 'high' ? 'high' : 'fast'
+
 	// Drop the illustration below all existing content.
 	const pos = getNextDrawPosition(editor)
 	const width = (input.width as number) ?? 400
 
-	// Cache hit? Skip Quiver entirely — instant render.
-	let svg: string
-	const cached = drawCache.get(subject)
+	// Cache hit? Skip generation entirely — instant render.
+	const cached = drawCache.get(subject, quality)
 	if (cached) {
-		console.log(`[Draw] cache hit for "${subject}" → instant render`)
-		svg = cached.svg
-	} else {
-		try {
-			svg = await streamQuiverSvg(subject, {
-				prompt: subject,
-				instructions: QUIVER_STYLE_INSTRUCTIONS,
-				model: QUIVER_MODEL,
-			})
-			console.log(`[Voice] Quiver SVG received (${svg.length} chars)`)
-		} catch (err) {
-			return {
-				success: false,
-				message: `Failed to fetch SVG from Quiver: ${err instanceof Error ? err.message : String(err)}`,
-			}
-		}
+		console.log(`[Draw] cache hit for "${subject}" (${quality}) → instant render`)
+		return renderSvgToCanvas(editor, cached.svg, subject, pos, width, ctx)
 	}
 
+	// High-quality path is the streaming morph orchestration in Phase 2.
+	if (quality === 'high') {
+		return executeHighQualityDraw(editor, subject, pos, width, ctx)
+	}
+
+	// Fast default: Gemini 3.1 Flash → render normally.
+	let svg: string
+	try {
+		svg = await generateSvgViaGemini(subject)
+	} catch (err) {
+		return {
+			success: false,
+			message: `Failed to fetch SVG from Gemini: ${err instanceof Error ? err.message : String(err)}`,
+		}
+	}
+	drawCache.set(subject, svg, 'fast')
+	return renderSvgToCanvas(editor, svg, subject, pos, width, ctx)
+}
+
+/** Render an already-fetched SVG onto the canvas with the standard pen-following animation. */
+async function renderSvgToCanvas(
+	editor: Editor,
+	svg: string,
+	subject: string,
+	pos: { x: number; y: number },
+	width: number,
+	ctx: ToolExecCtx
+): Promise<ToolResult> {
 	try {
 		const ids = await drawSvg(editor, svg, {
 			originX: pos.x,
 			originY: pos.y,
 			width,
 			animate: true,
-			// Track Jarvis's cursor along the pen tip as each stroke draws.
 			onPenMove: ctx.cursor ? (px, py) => ctx.cursor!.moveTo(px, py) : undefined,
 		})
 		if (ids.length === 0) {
-			return { success: false, message: 'Quiver returned SVG but it parsed to no strokes.' }
+			return { success: false, message: 'SVG returned but parsed to no strokes.' }
 		}
 		return {
 			success: true,
@@ -752,6 +663,27 @@ async function executeDraw(
 			message: `Failed to render SVG: ${err instanceof Error ? err.message : String(err)}`,
 		}
 	}
+}
+
+/**
+ * High-quality draw path: fire Gemini and Quiver in parallel. Render the fast
+ * Gemini result with the normal pen-following animation, then morph each
+ * Quiver path onto the closest Gemini shape as it streams in (Ship of Theseus).
+ *
+ * Falls back gracefully if either side fails.
+ */
+async function executeHighQualityDraw(
+	editor: Editor,
+	subject: string,
+	pos: { x: number; y: number },
+	width: number,
+	ctx: ToolExecCtx
+): Promise<ToolResult> {
+	const { runMorphOrchestration } = await import('../lib/morph-orchestration')
+	return runMorphOrchestration(editor, subject, pos, width, ctx, {
+		quiverInstructions: QUIVER_STYLE_INSTRUCTIONS,
+		quiverModel: QUIVER_MODEL,
+	})
 }
 
 /** Best-effort spot to drop a new illustration: below all existing shapes. */

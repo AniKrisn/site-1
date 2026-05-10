@@ -92,13 +92,13 @@ export class IntelligentCanvasAgent {
 	 * narration, no canvas items. Used when LiveVoiceController detects a
 	 * pure "draw X" request and wants to skip the heavyweight pipeline.
 	 */
-	async drawDirectly(subject: string): Promise<void> {
+	async drawDirectly(subject: string, quality: 'fast' | 'high' = 'fast'): Promise<void> {
 		this.callbacks.onStatusChange('thinking', 'Drawing...')
 		try {
 			await executeToolCall(
 				this.editor,
 				'draw',
-				{ subject },
+				{ subject, quality },
 				{ cursor: this.cursor }
 			)
 		} catch (err) {

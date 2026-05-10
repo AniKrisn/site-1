@@ -18,7 +18,15 @@ import {
 	GEMINI_LIVE_VOICE,
 	LIVE_OUTPUT_SAMPLE_RATE,
 	LIVE_SYSTEM_PROMPT,
+	LIVE_TOOL_DECLARATIONS,
 } from './live-config'
+
+/** Shape of a tool call coming back from Live. */
+export interface LiveToolCall {
+	id: string
+	name: string
+	args: Record<string, unknown>
+}
 
 export type LiveStatus = 'idle' | 'connecting' | 'ready' | 'speaking' | 'error'
 
@@ -28,6 +36,12 @@ export interface LiveSessionCallbacks {
 	onModelTranscript?: (text: string) => void
 	/** Generic structured event log — used for latency measurement. */
 	onEvent?: (event: string, data?: Record<string, unknown>) => void
+	/**
+	 * Live model decided to call one of our tools. Return whatever data
+	 * Live should see in the function-response (or undefined for fire-and-
+	 * forget actions). Async — the caller can await downstream work.
+	 */
+	onToolCall?: (call: LiveToolCall) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
 }
 
 interface ServerMessage {
@@ -39,6 +53,8 @@ interface ServerMessage {
 		interrupted?: boolean
 		outputTranscription?: { text: string }
 	}
+	toolCall?: { functionCalls?: LiveToolCall[] }
+	toolCallCancellation?: { ids: string[] }
 	goAway?: { timeLeft: string }
 }
 
@@ -114,6 +130,7 @@ export class GeminiLiveSession {
 								},
 							},
 							systemInstruction: { parts: [{ text: LIVE_SYSTEM_PROMPT }] },
+							tools: [{ functionDeclarations: LIVE_TOOL_DECLARATIONS }],
 							outputAudioTranscription: {},
 						},
 					})
@@ -363,9 +380,38 @@ export class GeminiLiveSession {
 			}
 		}
 
+		if (msg.toolCall?.functionCalls) {
+			for (const call of msg.toolCall.functionCalls) {
+				void this.handleToolCall(call)
+			}
+		}
+
 		if (msg.goAway) {
 			this.logEvent('go-away', { timeLeft: msg.goAway.timeLeft })
 		}
+	}
+
+	/**
+	 * Live invoked one of our tools. Dispatch to the host via onToolCall,
+	 * await any returned data, then post a functionResponse back so Live
+	 * knows it can continue. Errors are caught — we still post a response
+	 * so the model isn't left hanging.
+	 */
+	private async handleToolCall(call: LiveToolCall): Promise<void> {
+		this.logEvent('tool-call', { name: call.name, args: call.args })
+		let response: Record<string, unknown> = { ok: true }
+		try {
+			const result = await this.callbacks.onToolCall?.(call)
+			if (result && typeof result === 'object') response = result
+		} catch (err) {
+			console.error('[Live] tool handler threw:', err)
+			response = { ok: false, error: err instanceof Error ? err.message : String(err) }
+		}
+		this.sendJson({
+			toolResponse: {
+				functionResponses: [{ id: call.id, name: call.name, response }],
+			},
+		})
 	}
 
 	private handleAudioOut(b64: string) {

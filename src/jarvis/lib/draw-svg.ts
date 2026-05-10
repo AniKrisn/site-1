@@ -51,6 +51,15 @@ export interface DrawSvgOptions {
 	 * along the pen as the drawing reveals itself.
 	 */
 	onPenMove?: (pageX: number, pageY: number) => void
+	/**
+	 * Total animation duration budget when a cursor is following. Distributed
+	 * across strokes. Defaults to TOTAL_ANIMATION_MS_WITH_CURSOR (~7s) for
+	 * full SVGs. Callers rendering a single path on its own (e.g. the morph
+	 * orchestrator's "fresh stroke" fallback) should pass a much smaller
+	 * value like 500ms — otherwise a single stroke will stretch over the
+	 * whole 7s budget.
+	 */
+	totalDurationMs?: number
 }
 
 /**
@@ -62,7 +71,14 @@ export async function drawSvg(
 	svg: string,
 	options: DrawSvgOptions
 ): Promise<TLShapeId[]> {
-	const { originX, originY, width, animate = true, onPenMove } = options
+	const {
+		originX,
+		originY,
+		width,
+		animate = true,
+		onPenMove,
+		totalDurationMs = TOTAL_ANIMATION_MS_WITH_CURSOR,
+	} = options
 
 	const aspect = readSvgAspect(svg)
 	const height = width / aspect
@@ -86,10 +102,10 @@ export async function drawSvg(
 		if (onPenMove) {
 			// Sequential — so the follower can track one continuous pen line.
 			// Budget the total time across strokes so a 5-stroke fish and a
-			// 30-stroke bull both finish in ~TOTAL_ANIMATION_MS_WITH_CURSOR.
+			// 30-stroke bull both finish in ~totalDurationMs.
 			const perStrokeMs = Math.max(
 				MIN_STROKE_MS_WITH_CURSOR,
-				Math.floor(TOTAL_ANIMATION_MS_WITH_CURSOR / Math.max(1, pending.length))
+				Math.floor(totalDurationMs / Math.max(1, pending.length))
 			)
 			for (const c of pending) {
 				await animateDrawShape(editor, c.id, c.pendingAnimation, c, perStrokeMs, onPenMove)
