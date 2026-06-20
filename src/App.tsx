@@ -24,6 +24,7 @@ const projects: ProjectItem[] = [
     mobileHref: "https://github.com/AniKrisn/code-editor/",
   },
   { title: "Jarvis", slug: "/jarvis" },
+  { title: "Salon", slug: "/salon" },
 ];
 
 function App() {

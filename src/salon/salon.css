@@ -1,0 +1,529 @@
+/* Salon — quiet, art-forward chrome. The works supply the colour; everything
+   here stays out of the way. Reuses the site's cream/charcoal theme vars. */
+
+.salon-root {
+	--salon-panel-w: 420px;
+	--salon-rule: color-mix(in srgb, var(--color-text) 14%, transparent);
+	--salon-faint: color-mix(in srgb, var(--color-text) 55%, transparent);
+	--salon-wall: color-mix(in srgb, var(--color-text) 4%, var(--color-bg));
+
+	position: fixed;
+	inset: 0;
+	display: grid;
+	grid-template-columns: 1fr var(--salon-panel-w);
+	font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	color: var(--color-text);
+	background: var(--color-bg);
+	overflow: hidden;
+}
+
+/* ---- Left: the wall ---- */
+
+.salon-canvas-pane {
+	position: relative;
+	height: 100%;
+	background: var(--salon-wall);
+}
+
+/* Soften tldraw's chrome toward a gallery surface. */
+.salon-canvas-pane .tl-background {
+	background: var(--salon-wall);
+}
+.salon-canvas-pane .tl-container {
+	--color-background: var(--salon-wall);
+}
+
+/* ---- Artwork shape ---- */
+
+.salon-artwork {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: 100%;
+	height: 100%;
+	pointer-events: all;
+}
+
+.salon-artwork__frame {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.salon-artwork__img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	display: block;
+	background: #fff;
+	user-select: none;
+}
+
+.salon-artwork__placeholder {
+	display: grid;
+	place-items: center;
+	width: 100%;
+	height: 100%;
+	color: #999;
+	font-size: 12px;
+	background: #f3f3f3;
+}
+
+.salon-artwork__label {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1px;
+	margin-top: 10px;
+	text-align: center;
+	max-width: 100%;
+	line-height: 1.25;
+}
+.salon-artwork__title {
+	font-size: 11px;
+	letter-spacing: 0.01em;
+	color: var(--color-text);
+}
+.salon-artwork__meta {
+	font-size: 10px;
+	color: var(--salon-faint);
+	font-style: italic;
+}
+
+/* ---- Right: the reading space ---- */
+
+.salon-panel {
+	position: relative;
+	height: 100%;
+	border-left: 1px solid var(--salon-rule);
+	background: var(--color-bg);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.salon-panel__head {
+	padding: 28px 32px 18px;
+	border-bottom: 1px solid var(--salon-rule);
+}
+
+.salon-panel__wordmark {
+	font-family: Georgia, "Times New Roman", serif;
+	font-weight: 400;
+	font-size: 22px;
+	letter-spacing: 0.02em;
+}
+
+.salon-panel__tagline {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--salon-faint);
+	font-style: italic;
+}
+
+.salon-panel__body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 24px 32px 96px;
+}
+
+/* ---- Editorial prose ---- */
+
+.salon-prose {
+	font-size: 15px;
+	line-height: 1.6;
+}
+.salon-prose p + p {
+	margin-top: 14px;
+}
+
+.salon-muted {
+	color: var(--salon-faint);
+}
+
+.salon-pending {
+	font-style: italic;
+}
+
+.salon-work-title {
+	font-family: Georgia, "Times New Roman", serif;
+	font-weight: 400;
+	font-size: 24px;
+	line-height: 1.2;
+	margin-bottom: 4px;
+}
+
+.salon-work-meta {
+	font-size: 13px;
+	color: var(--salon-faint);
+	margin-bottom: 18px;
+}
+
+/* ---- Note view ---- */
+
+.salon-note__id {
+	margin-bottom: 22px;
+}
+.salon-note__confidence {
+	font-size: 12px;
+	color: var(--salon-faint);
+	margin-top: 2px;
+}
+.salon-conf--high {
+	color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+.salon-conf--low,
+.salon-conf--unknown {
+	font-style: italic;
+}
+.salon-note__caveat {
+	font-size: 13px;
+	font-style: italic;
+	color: var(--salon-faint);
+	margin-top: 8px;
+}
+
+.salon-note__voices {
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+}
+
+/* Each voice: a hairline rule + a quiet label, no loud boxes. */
+.salon-voice {
+	padding-left: 14px;
+	border-left: 2px solid var(--salon-rule);
+}
+.salon-voice--maker {
+	border-left-color: color-mix(in srgb, var(--color-text) 35%, transparent);
+}
+.salon-voice--salon {
+	border-left-style: dashed;
+}
+.salon-voice__label {
+	display: block;
+	font-size: 10.5px;
+	text-transform: uppercase;
+	letter-spacing: 0.09em;
+	color: var(--salon-faint);
+	margin-bottom: 5px;
+}
+.salon-voice__text {
+	font-size: 15px;
+	line-height: 1.62;
+}
+.salon-voice--maker .salon-voice__text {
+	font-family: Georgia, "Times New Roman", serif;
+	font-style: italic;
+}
+.salon-voice--salon .salon-voice__text {
+	font-family: Georgia, "Times New Roman", serif;
+}
+
+.salon-voice__cites {
+	margin-left: 4px;
+	white-space: nowrap;
+}
+.salon-cite {
+	display: inline-block;
+	min-width: 15px;
+	height: 15px;
+	padding: 0 3px;
+	margin-left: 2px;
+	font-size: 10px;
+	line-height: 15px;
+	text-align: center;
+	border-radius: 3px;
+	color: var(--color-bg);
+	background: color-mix(in srgb, var(--color-text) 55%, transparent);
+	text-decoration: none;
+	vertical-align: super;
+}
+.salon-cite:hover {
+	background: var(--color-text);
+}
+
+.salon-note__thinness {
+	margin-top: 20px;
+	padding: 10px 12px;
+	font-size: 13px;
+	font-style: italic;
+	color: var(--salon-faint);
+	background: color-mix(in srgb, var(--color-text) 4%, transparent);
+	border-radius: 4px;
+}
+
+.salon-sources {
+	margin-top: 24px;
+	border-top: 1px solid var(--salon-rule);
+	padding-top: 12px;
+}
+.salon-sources summary {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--salon-faint);
+	cursor: pointer;
+}
+.salon-sources__list {
+	margin: 10px 0 0 18px;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--salon-faint);
+}
+.salon-sources__list li {
+	margin-bottom: 6px;
+}
+.salon-sources__list a,
+.salon-voice a:not(.salon-cite) {
+	color: inherit;
+}
+
+/* ---- Buttons & states ---- */
+
+.salon-btn {
+	margin-top: 18px;
+	font: inherit;
+	font-size: 13px;
+	padding: 8px 16px;
+	color: var(--color-bg);
+	background: var(--color-text);
+	border: none;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: opacity 0.15s ease;
+}
+.salon-btn:hover {
+	opacity: 0.85;
+}
+.salon-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.salon-btn--ghost {
+	color: var(--salon-faint);
+	background: none;
+	border: 1px solid var(--salon-rule);
+	padding: 6px 14px;
+	font-size: 12px;
+}
+
+.salon-thinking::after {
+	content: "";
+	animation: salon-dots 1.4s steps(4, end) infinite;
+}
+@keyframes salon-dots {
+	0% { content: ""; }
+	25% { content: "."; }
+	50% { content: ".."; }
+	75% { content: "..."; }
+}
+
+.salon-error {
+	color: #b3261e;
+	font-size: 13px;
+	margin-bottom: 10px;
+}
+
+/* ---- Connection ---- */
+
+.salon-stance {
+	display: inline-block;
+	font-size: 10.5px;
+	text-transform: uppercase;
+	letter-spacing: 0.09em;
+	padding: 3px 9px;
+	border-radius: 999px;
+	margin-bottom: 10px;
+}
+.salon-stance--connected {
+	color: var(--color-bg);
+	background: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+.salon-stance--declined {
+	color: var(--salon-faint);
+	border: 1px solid var(--salon-rule);
+}
+.salon-connection__headline {
+	font-size: 21px;
+	margin-bottom: 16px;
+}
+.salon-connection__arg {
+	border-left-style: dashed;
+}
+.salon-connection__grounds {
+	margin-top: 18px;
+}
+.salon-connection__grounds ul {
+	margin: 8px 0 0 18px;
+	font-size: 13.5px;
+	line-height: 1.55;
+	color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+.salon-connection__grounds li {
+	margin-bottom: 7px;
+}
+
+.salon-verdicts {
+	margin-top: 22px;
+}
+.salon-verdicts__row {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+.salon-verdict {
+	font: inherit;
+	font-size: 12.5px;
+	padding: 6px 14px;
+	border: 1px solid var(--salon-rule);
+	border-radius: 999px;
+	background: none;
+	color: var(--salon-faint);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+.salon-verdict:hover {
+	border-color: color-mix(in srgb, var(--color-text) 35%, transparent);
+	color: var(--color-text);
+}
+.salon-verdict--on {
+	color: var(--color-bg);
+	background: var(--color-text);
+	border-color: var(--color-text);
+}
+
+/* ---- Home: taste profile + suggestion ---- */
+
+.salon-home__block {
+	margin-top: 30px;
+}
+
+.salon-suggestion__title {
+	font-size: 19px;
+	margin-bottom: 8px;
+}
+.salon-suggestion__why {
+	font-family: Georgia, "Times New Roman", serif;
+}
+.salon-suggestion__where {
+	font-size: 13px;
+	margin-top: 8px;
+}
+.salon-suggestion .salon-sources__list {
+	margin-top: 10px;
+}
+
+.salon-taste {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.salon-chips__row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+.salon-chip {
+	font-size: 12px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--color-text) 8%, transparent);
+	color: color-mix(in srgb, var(--color-text) 85%, transparent);
+}
+.salon-taste__obs {
+	width: 100%;
+	margin-top: 14px;
+	font-family: Georgia, "Times New Roman", serif;
+	font-size: 13.5px;
+}
+
+/* ---- Conversation ---- */
+
+.salon-chat {
+	margin-top: 28px;
+}
+.salon-chat__rule {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 16px;
+	font-size: 10.5px;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--salon-faint);
+}
+.salon-chat__rule::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: var(--salon-rule);
+}
+
+.salon-msg {
+	font-size: 14px;
+	line-height: 1.55;
+	margin-bottom: 14px;
+	max-width: 92%;
+}
+.salon-msg--user {
+	margin-left: auto;
+	padding: 8px 12px;
+	border-radius: 12px 12px 2px 12px;
+	background: color-mix(in srgb, var(--color-text) 9%, transparent);
+	white-space: pre-wrap;
+}
+.salon-msg--salon {
+	font-family: Georgia, "Times New Roman", serif;
+	white-space: pre-wrap;
+}
+
+.salon-chat__compose {
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+	margin-top: 16px;
+	position: sticky;
+	bottom: 0;
+	background: var(--color-bg);
+	padding-top: 8px;
+}
+.salon-chat__input {
+	flex: 1;
+	font: inherit;
+	font-size: 14px;
+	line-height: 1.5;
+	padding: 8px 10px;
+	color: var(--color-text);
+	background: color-mix(in srgb, var(--color-text) 4%, transparent);
+	border: 1px solid var(--salon-rule);
+	border-radius: 8px;
+	resize: vertical;
+	outline: none;
+}
+.salon-chat__input:focus {
+	border-color: color-mix(in srgb, var(--color-text) 35%, transparent);
+}
+.salon-chat__compose .salon-btn {
+	margin-top: 0;
+	flex-shrink: 0;
+}
+
+/* The corner theme dot belongs to the site; keep it above the canvas. */
+.salon-root .dot-corner {
+	z-index: 1000;
+}
+
+@media (max-width: 900px) {
+	.salon-root {
+		grid-template-columns: 1fr;
+		grid-template-rows: 1fr;
+	}
+	.salon-panel {
+		display: none;
+	}
+}
