@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemeToggle } from "../ThemeToggle";
 
 function Primitives() {
   return (
