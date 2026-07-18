@@ -15,8 +15,6 @@ const posts: LinkItem[] = [
   { title: "Primitives", slug: "/primitives" },
   { title: "Specificity", slug: "/specificity" },
   { title: "Descriptions", slug: "/descriptions" },
-  { title: "Artefacts", slug: "/artefacts" },
-  { title: "Love", slug: "/love" },
 ];
 
 const projects: ProjectItem[] = [
