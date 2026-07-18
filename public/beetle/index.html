@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Beetle</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="title"><span>Beetle</span></div>
+      <button class="roll" id="roll" type="button" aria-label="new specimen"
+              title="new specimen — or press any key">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="19" height="19" rx="4.5" fill="currentColor"/>
+          <circle cx="8" cy="8" r="2" fill="#0b0b0d"/>
+          <circle cx="16" cy="8" r="2" fill="#0b0b0d"/>
+          <circle cx="12" cy="12" r="2" fill="#0b0b0d"/>
+          <circle cx="8" cy="16" r="2" fill="#0b0b0d"/>
+          <circle cx="16" cy="16" r="2" fill="#0b0b0d"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="body">
+      <div class="viewport">
+        <canvas id="view"></canvas>
+        <div class="intro" id="intro">
+          <div class="intro-card">
+            <p class="intro-lead">Click or press any key to get a new set of colors.</p>
+            <button class="intro-ok" id="intro-ok" type="button">OK</button>
+          </div>
+        </div>
+      </div>
+      <div class="panel" id="panel"></div>
+    </div>
+
+    <div class="strip">
+      <div class="cell fps" id="fps-cell">-- FPS</div>
+      <div class="cell grow"><canvas id="perf-strip-graph" width="240" height="30"></canvas></div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
