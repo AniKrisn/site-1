@@ -35,13 +35,16 @@ function App() {
     <main className="container">
       <div className="content">
         <div className="sections">
-          <nav className="posts">
-            {posts.map((post) => (
-              <a key={post.slug} href={post.slug} className="post-link">
-                {post.title}
-              </a>
-            ))}
-          </nav>
+          <section className="posts-section">
+            <h2 className="section-title">notes</h2>
+            <nav className="posts">
+              {posts.map((post) => (
+                <a key={post.slug} href={post.slug} className="post-link">
+                  {post.title}
+                </a>
+              ))}
+            </nav>
+          </section>
           <section className="projects">
             <h2 className="section-title">Projects</h2>
             <nav className="projects-list">
