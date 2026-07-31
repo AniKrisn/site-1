@@ -215,3 +215,13 @@ body.minimal .intro {
 .strip .cell.fps { color: #05221f; background: var(--accent); font-weight: bold; }
 .strip .cell.grow { flex: 1; padding: 0; }
 #perf-strip-graph { width: 100%; height: 30px; }
+
+/* --- embed (?embed) --- */
+/* Bare specimen for framing inside another page: no chrome, no intro, canvas
+   edge to edge. */
+body.embed { background: #000; }
+body.embed .window { inset: 0; border: none; box-shadow: none; }
+body.embed .titlebar,
+body.embed .strip { display: none; }
+body.embed.minimal .intro { display: none; }
+body.embed .body { border-bottom: none; }

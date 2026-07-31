@@ -27,6 +27,7 @@
   margin-bottom: 0;
 }
 
+
 .dot-post {
   display: block;
   width: 12px;
@@ -40,4 +41,13 @@
 .dot-post:hover {
   transform: scale(1.2);
   background-color: #f7e396;
+}
+
+/* On mobile the theme dot lives at the bottom right, so the back dot moves
+   to the article's left edge to keep out of its way. */
+@media (max-width: 768px) {
+  .dot-post {
+    align-self: flex-start;
+    margin-right: 0;
+  }
 }

@@ -96,6 +96,9 @@ canvas.addEventListener('pointerleave', () => { mouse.down = 0; pressed = false;
 // ?full brings up the whole tuning panel instead.
 const panelRoot = document.getElementById('panel');
 const FULL = new URLSearchParams(location.search).has('full');
+// ?embed strips everything but the canvas so the specimen can sit behind
+// another page (the site home card peeks it out like a drop shadow).
+const EMBED = new URLSearchParams(location.search).has('embed');
 const roll = () => rollSpecimen(SCHEMA, () => {});
 
 let perfPane;
@@ -106,6 +109,7 @@ if (FULL) {
   }));
 } else {
   document.body.classList.add('minimal');
+  if (EMBED) document.body.classList.add('embed');
   perfPane = document.createElement('div');   // detached — perf rows draw here, unseen
   document.getElementById('roll')?.addEventListener('click', roll);
   onTap = roll;                                // a click on the canvas rolls too

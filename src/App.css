@@ -5,9 +5,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  min-height: 100vh;
+  min-height: 100%;
   padding: 2rem;
-  padding-top: 20vh;
+  padding-top: 96px;
   max-width: 60ch;
   margin: 0 auto;
 }
@@ -16,6 +16,90 @@
   display: flex;
   align-items: flex-start;
   gap: 1.5rem;
+}
+
+/* Site frame: the live Beetle canvas fills the window edge-to-edge; every
+   page renders on a card wedged slightly off-centre on top of it, so the
+   specimen shows as a thin live gutter around the card. */
+/* The beetle is the card's drop shadow: same rect as the card, pushed one
+   unit right and two down, so it peeks out along the right and bottom only. */
+.stage {
+  position: fixed;
+  inset: 40px 56px 64px 40px;
+  transform: translate(10px, 12px);
+  clip-path: url(#stage-clip);
+  /* Shows while the beetle iframe loads: the site's dot green, so the
+     shadow shape reads as deliberate from the first frame. */
+  background: #00d26a;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Hand-drawn borders: tldraw draw-style paths overlaid on each card so text
+   and beetle stay undistorted. */
+.sketch {
+  position: fixed;
+  pointer-events: none;
+}
+
+.sketch svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sketch path {
+  fill: none;
+  stroke: var(--color-line);
+  stroke-width: 4px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.2s ease;
+}
+
+.sketch-stage {
+  inset: 40px 56px 64px 40px;
+  transform: translate(10px, 12px);
+  z-index: 1;
+}
+
+.sketch-card {
+  inset: 40px 56px 64px 40px;
+  z-index: 3;
+}
+
+.beetle-bg {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+/* 8px module: equal margins top/left/right, a decisively heavier base
+   (3 units) for optical centring — deliberate asymmetry, not near-miss. */
+.frame-card {
+  position: fixed;
+  inset: 40px 56px 64px 40px;
+  background: var(--color-card);
+  clip-path: url(#card-clip);
+  z-index: 2;
+  overflow: auto;
+  transition: background-color 0.2s ease;
+}
+
+/* Mobile keeps the near-fullscreen card. */
+@media (max-width: 768px) {
+  .stage,
+  .sketch-stage {
+    inset: 8px 16px 24px 20px;
+    transform: translate(12px, 14px);
+  }
+
+  .frame-card,
+  .sketch-card {
+    inset: 8px 16px 24px 8px;
+  }
 }
 
 .sections {
@@ -32,6 +116,7 @@
 }
 
 .section-title {
+  position: relative;
   font-family: "Geist Mono", monospace;
   font-size: 0.85rem;
   font-weight: 500;
@@ -53,6 +138,21 @@
   opacity: 0.5;
 }
 
+.dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  background-color: #00d26a;
+  border-radius: 50%;
+  margin-top: -10%;
+  transition: transform 0.1s ease, background-color 0.2s ease;
+}
+
+.dot:hover {
+  transform: scale(1.2);
+  background-color: #f7e396;
+}
+
 .project-link-wrap {
   display: contents;
 }
@@ -71,17 +171,3 @@
   }
 }
 
-.dot {
-  display: block;
-  width: 12px;
-  height: 12px;
-  background-color: #00d26a;
-  border-radius: 50%;
-  margin-top: -10%;
-  transition: transform 0.1s ease, background-color 0.2s ease;
-}
-
-.dot:hover {
-  transform: scale(1.2);
-  background-color: #f7e396;
-}

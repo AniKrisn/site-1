@@ -39,9 +39,9 @@ function App() {
             <h2 className="section-title">notes</h2>
             <nav className="posts">
               {posts.map((post) => (
-                <a key={post.slug} href={post.slug} className="post-link">
+                <Link key={post.slug} to={post.slug} className="post-link">
                   {post.title}
-                </a>
+                </Link>
               ))}
             </nav>
           </section>

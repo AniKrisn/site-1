@@ -1,11 +1,17 @@
+/* Mid-grey ground in light mode — between the white card and the dark
+   beetle, so neither shouts; dark mode goes near-black. */
 :root {
-  --color-bg: #faf3e1;
+  --color-bg: #e2e2e5;
   --color-text: #222222;
+  --color-card: #fcfcfd;
+  --color-line: #333333;
 }
 
 [data-theme="dark"] {
-  --color-bg: #222222;
+  --color-bg: #19191b;
   --color-text: #faf3e1;
+  --color-card: #232326;
+  --color-line: #0c0c0d;
 }
 
 * {
@@ -32,8 +38,10 @@ body {
   height: 12px;
   border-radius: 50%;
   background-color: var(--color-text);
-  top: 24px;
-  right: 24px;
+  /* Equal 16px (2u) gap from the card's inner top and right edges. */
+  top: 60px;
+  right: 76px;
+  z-index: 3;
   border: none;
   cursor: pointer;
   transition: transform 0.1s ease, background-color 0.2s ease;
@@ -47,10 +55,11 @@ body {
   outline: none;
 }
 
+
 @media (max-width: 768px) {
   .dot-corner {
     top: auto;
-    bottom: 24px;
-    right: 24px;
+    bottom: 44px;
+    right: 36px;
   }
 }
