@@ -38,9 +38,9 @@ body {
   height: 12px;
   border-radius: 50%;
   background-color: var(--color-text);
-  /* Equal 16px (2u) gap from the card's inner top and right edges. */
-  top: 60px;
-  right: 76px;
+  /* Bottom-right of the card, a generous 40px (5u) in from its inner edges. */
+  bottom: 104px;
+  right: 96px;
   z-index: 3;
   border: none;
   cursor: pointer;
@@ -58,7 +58,6 @@ body {
 
 @media (max-width: 768px) {
   .dot-corner {
-    top: auto;
     bottom: 44px;
     right: 36px;
   }
