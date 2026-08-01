@@ -11,9 +11,14 @@
   padding: 136px 2rem 2rem 136px;
 }
 
+/* Mobile keeps the original centred layout; the corner anchor is desktop-only. */
 @media (max-width: 768px) {
   .container {
-    padding: 80px 24px 48px 24px;
+    align-items: center;
+    padding: 2rem;
+    padding-top: 96px;
+    max-width: 60ch;
+    margin: 0 auto;
   }
 }
 
