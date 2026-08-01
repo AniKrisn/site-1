@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
 import { ThemeToggle } from "../ThemeToggle";
+import { TextCard } from "../Frame";
 
 function Specificity() {
   return (
     <main className="container">
-      <div className="content post-content">
+      <TextCard>
+        <div className="content post-content">
         <article className="post-text">
           <h1>Specificity</h1>
           <p>
@@ -26,6 +28,7 @@ function Specificity() {
         </article>
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
+      </TextCard>
       <ThemeToggle />
     </main>
   );

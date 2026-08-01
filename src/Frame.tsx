@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import { drawRectD } from "./sketch";
 
 const STROKE_WIDTH = 4;
@@ -50,12 +50,29 @@ function SketchBorder({
   );
 }
 
+/* The card-with-offset-shadow motif at text scale: a snug card around a
+   page's text block, with a solid accent shadow behind it (the beetle stays
+   unique to the outer frame). */
+export function TextCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-card">
+      <div className="text-card-shadow" aria-hidden="true" />
+      <div className="text-card-inner">{children}</div>
+      <SketchBorder seed="text" className="sketch-text" clipId="text-clip" />
+    </div>
+  );
+}
+
 /* Site-wide chrome: the live Beetle canvas is a back-card drop shadow behind
    the content card; both get hand-drawn tldraw-style borders and are clipped
    to them. */
 export function Frame() {
+  // Home is the beetle showcase: the specimen fills the window and the big
+  // white card dissolves, leaving just the floating text card.
+  const { pathname } = useLocation();
+  const isHome = pathname === "/";
   return (
-    <div className="frame">
+    <div className={isHome ? "frame frame-home" : "frame"}>
       <div className="stage" aria-hidden="true">
         <iframe
           className="beetle-bg"

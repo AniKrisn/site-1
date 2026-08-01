@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import "./App.css";
 import { ThemeToggle } from "./ThemeToggle";
+import { TextCard } from "./Frame";
 
 interface LinkItem {
   title: string;
@@ -33,7 +34,8 @@ const projects: ProjectItem[] = [
 function App() {
   return (
     <main className="container">
-      <div className="content">
+      <TextCard>
+        <div className="content">
         <div className="sections">
           <section className="posts-section">
             <h2 className="section-title">notes</h2>
@@ -70,6 +72,7 @@ function App() {
         </div>
         <Link to="/about" className="dot" aria-label="About" />
       </div>
+      </TextCard>
       <ThemeToggle />
     </main>
   );

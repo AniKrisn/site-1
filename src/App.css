@@ -69,6 +69,51 @@
   z-index: 3;
 }
 
+/* Home: beetle showcase — the stage fills the window, the big card
+   dissolves, and the text card floats directly on the specimen. */
+.frame-home .stage,
+.frame-home .sketch-stage {
+  inset: 16px;
+  transform: none;
+}
+
+.frame-home .frame-card {
+  background: transparent;
+  clip-path: none;
+}
+
+.frame-home .sketch-card {
+  display: none;
+}
+
+/* Inner text card: same motif at text scale, solid accent shadow. */
+.text-card {
+  position: relative;
+}
+
+.text-card-shadow {
+  position: absolute;
+  inset: 0;
+  transform: translate(8px, 10px);
+  background: var(--color-shadow-accent);
+  border-radius: 18px;
+  z-index: 0;
+}
+
+.text-card-inner {
+  position: relative;
+  z-index: 1;
+  background: var(--color-card);
+  clip-path: url(#text-clip);
+  padding: 2.5rem 3rem;
+}
+
+.sketch-text {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
 .beetle-bg {
   width: 100%;
   height: 100%;

@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
 import { ThemeToggle } from "../ThemeToggle";
+import { TextCard } from "../Frame";
 
 function Descriptions() {
   return (
     <main className="container">
-      <div className="content post-content">
+      <TextCard>
+        <div className="content post-content">
         <article className="post-text">
           <h1>Descriptions</h1>
           <p>1. Code is data, data is code, both are empty.</p>
@@ -25,6 +27,7 @@ function Descriptions() {
         </article>
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
+      </TextCard>
       <ThemeToggle />
     </main>
   );

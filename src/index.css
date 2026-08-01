@@ -5,6 +5,7 @@
   --color-text: #222222;
   --color-card: #fcfcfd;
   --color-line: #333333;
+  --color-shadow-accent: #f7e396;
 }
 
 [data-theme="dark"] {
@@ -12,6 +13,7 @@
   --color-text: #faf3e1;
   --color-card: #232326;
   --color-line: #0c0c0d;
+  --color-shadow-accent: #4a452c;
 }
 
 * {
