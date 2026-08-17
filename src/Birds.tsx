@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { setObstacles } from "./dodge";
 
 /* Four wingbeat poses drawn on the DC-1, traced and bottom-centre aligned so
    the body holds still while the wings cycle. The flap is a six-phase
@@ -28,6 +29,17 @@ const COUNT = 5;
    at ~0.38 of the width, so this is up and to its right. */
 const AX = 0.52;
 const AY = 0.34;
+
+/* Sleeping spots on the tree crown, in the landscape-art viewBox coordinates
+   (crown ink spans roughly x 294-485, y 315-750; the viewBox y starts at
+   300). One per bird. */
+const PERCHES = [
+  [393, 326],
+  [364, 430],
+  [448, 470],
+  [338, 578],
+  [452, 606],
+];
 
 export function Birds() {
   const ref = useRef<HTMLDivElement>(null);
@@ -60,13 +72,60 @@ export function Birds() {
       // out along its own slowly-turning bearing.
       th: Math.random() * Math.PI * 2,
       thRate: (Math.random() - 0.5) * 0.4,
+      // Roosting state, plus a personal nudge off the assigned perch.
+      asleep: false,
+      pjx: (Math.random() - 0.5) * 6,
+      pjy: (Math.random() - 0.5) * 4,
     }));
 
-    const place = () =>
+    let originX = 0;
+    let originY = 0;
+    const readOrigin = () => {
+      const r = root.getBoundingClientRect();
+      originX = r.left;
+      originY = r.top;
+    };
+    readOrigin();
+    window.addEventListener("resize", readOrigin);
+
+    // Dark mode sends the flock to the tree to sleep. The theme attribute is
+    // watched directly so the flock reacts without a re-render; flipping back
+    // to light wakes everyone with an upward scatter.
+    let dark = document.documentElement.getAttribute("data-theme") === "dark";
+    const themeWatch = new MutationObserver(() => {
+      const next =
+        document.documentElement.getAttribute("data-theme") === "dark";
+      if (next === dark) return;
+      dark = next;
+      if (!next) {
+        birds.forEach((b, i) => {
+          if (!b.asleep) return;
+          b.asleep = false;
+          els[i].classList.remove("asleep");
+          b.vx = (Math.random() - 0.5) * 80;
+          b.vy = -40 - Math.random() * 40;
+        });
+      }
+    });
+    themeWatch.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
+    const place = () => {
       birds.forEach((b, i) => {
         els[i].style.transform =
           `translate(-50%, -50%) translate(${b.x.toFixed(1)}px, ${b.y.toFixed(1)}px)`;
       });
+      setObstacles(
+        "birds",
+        birds.map((b, i) => ({
+          x: originX + b.x,
+          y: originY + b.y,
+          r: specs[i].size * 0.55 + 4,
+        }))
+      );
+    };
     place();
 
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -85,6 +144,49 @@ export function Birds() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       t += dt;
+
+      // Night: glide to the crown perches, brake on approach, and hold the
+      // flat pose once settled. Perches are re-derived from the live art
+      // rect every frame so they survive resizes.
+      if (dark) {
+        const art = document.querySelector(".landscape-art");
+        const a = art?.getBoundingClientRect();
+        if (a && a.width > 0) {
+          const sx = a.width / 1080;
+          const sy = a.height / 745;
+          for (let i = 0; i < birds.length; i++) {
+            const b = birds[i];
+            const [cx, cy] = PERCHES[i % PERCHES.length];
+            const px = a.left - originX + cx * sx + b.pjx;
+            const py = a.top - originY + (cy - 300) * sy + b.pjy;
+            if (b.asleep) {
+              b.x = px;
+              b.y = py;
+              continue;
+            }
+            const dx = px - b.x;
+            const dy = py - b.y;
+            const d = Math.hypot(dx, dy) || 1;
+            if (d < 5 && Math.hypot(b.vx, b.vy) < 30) {
+              b.asleep = true;
+              b.x = px;
+              b.y = py;
+              b.vx = 0;
+              b.vy = 0;
+              els[i].classList.add("asleep");
+              continue;
+            }
+            const want = Math.min(120, 24 + d * 0.9);
+            b.vx += ((dx / d) * want - b.vx) * Math.min(1, 2.2 * dt);
+            b.vy += ((dy / d) * want - b.vy) * Math.min(1, 2.2 * dt);
+            b.x += b.vx * dt;
+            b.y += b.vy * dt;
+          }
+          place();
+          raf = requestAnimationFrame(tick);
+          return;
+        }
+      }
 
       // The flock breathes: g drifts between 0 (scattered, weak pull, big
       // personal wander) and 1 (gathered, tight). Two incommensurate sines
@@ -164,7 +266,12 @@ export function Birds() {
     };
 
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", readOrigin);
+      themeWatch.disconnect();
+      setObstacles("birds", []);
+    };
   }, []);
 
   return (

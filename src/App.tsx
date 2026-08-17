@@ -1,8 +1,6 @@
 import { Link } from "react-router-dom";
 import "./App.css";
 import { ThemeToggle } from "./ThemeToggle";
-import { Landscape } from "./Landscape";
-import { Birds } from "./Birds";
 
 interface LinkItem {
   title: string;
@@ -72,8 +70,6 @@ function App() {
         </div>
         <Link to="/about" className="dot" aria-label="About" />
       </div>
-      <Landscape />
-      <Birds />
       <ThemeToggle />
     </main>
   );
