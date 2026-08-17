@@ -26,6 +26,9 @@
   display: flex;
   align-items: flex-start;
   gap: 1.5rem;
+  /* Above the birds, so they pass behind the text. */
+  position: relative;
+  z-index: 1;
 }
 
 /* Site frame: the live Beetle canvas fills the window edge-to-edge; every
@@ -161,6 +164,141 @@
 .dot:hover {
   transform: scale(1.2);
   background-color: #f7e396;
+}
+
+/* Drawn on the DC-1. A full-width ground row near the card's bottom edge:
+   the drawing sits left of centre and wobbly line extensions carry its ground
+   line to both card edges. Same ink as the card border. Desktop only. */
+.landscape {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 56px;
+  display: flex;
+  align-items: flex-end;
+  color: var(--color-line);
+  pointer-events: none;
+}
+
+.landscape-art {
+  display: block;
+  width: 440px;
+  height: auto;
+  flex: none;
+}
+
+.landscape .ground {
+  height: 32px;
+  margin-bottom: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 5.5px;
+  stroke-linecap: round;
+  overflow: visible;
+}
+
+/* Negative margins tuck the extensions under the drawing's stroke tips so
+   the joins read as one continuous line. */
+.landscape .ground-left {
+  flex: 32 0 0;
+  margin-right: -14px;
+}
+
+.landscape .ground-right {
+  flex: 68 0 0;
+  margin-left: -16px;
+}
+
+/* In dark mode the sketch draws in the text cream rather than the
+   near-invisible dark border ink. */
+[data-theme="dark"] .landscape,
+[data-theme="dark"] .birds {
+  color: var(--color-text);
+}
+
+/* Birds cross the sky right-to-left, each a frame-flipped wingbeat: the four
+   drawn poses cycle down / flat / up / full-up / up / flat. Flight is a slow
+   translate, plus a gentle bob on an inner wrapper. */
+.birds {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--color-line);
+  pointer-events: none;
+}
+
+/* Positions come from the boids loop in Birds.tsx; per-bird flap speed and
+   phase come in as CSS vars. */
+.bird {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.bird .pose {
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+}
+
+.bird .pose + .pose {
+  position: absolute;
+  inset: 0;
+}
+
+.bird .pose-flat { opacity: 1; }
+
+.bird .pose-down { animation: flap-down var(--flap, 520ms) infinite; }
+.bird .pose-flat { animation: flap-flat var(--flap, 520ms) infinite; }
+.bird .pose-up { animation: flap-up var(--flap, 520ms) infinite; }
+.bird .pose-full { animation: flap-full var(--flap, 520ms) infinite; }
+
+.bird .pose { animation-delay: var(--flap-delay, 0ms); }
+
+@keyframes flap-down {
+  0%, 16.6% { opacity: 1; }
+  16.7%, 100% { opacity: 0; }
+}
+
+@keyframes flap-flat {
+  0%, 16.6% { opacity: 0; }
+  16.7%, 33.3% { opacity: 1; }
+  33.4%, 83.2% { opacity: 0; }
+  83.3%, 100% { opacity: 1; }
+}
+
+@keyframes flap-up {
+  0%, 33.3% { opacity: 0; }
+  33.4%, 50% { opacity: 1; }
+  50.1%, 66.6% { opacity: 0; }
+  66.7%, 83.2% { opacity: 1; }
+  83.3%, 100% { opacity: 0; }
+}
+
+@keyframes flap-full {
+  0%, 50% { opacity: 0; }
+  50.1%, 66.6% { opacity: 1; }
+  66.7%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bird .pose {
+    animation: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .birds {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .landscape {
+    display: none;
+  }
 }
 
 .project-link-wrap {
