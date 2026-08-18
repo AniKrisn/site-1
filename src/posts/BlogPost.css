@@ -6,7 +6,8 @@
 }
 
 .post-text {
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
+  font-variation-settings: "BLND" var(--blend);
   font-size: 0.95rem;
   color: var(--color-text);
   max-width: 60ch;

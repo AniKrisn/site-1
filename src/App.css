@@ -144,7 +144,8 @@
 
 .section-title {
   position: relative;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
+  font-variation-settings: "BLND" var(--blend);
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--color-text);
@@ -154,7 +155,8 @@
 }
 
 .post-link {
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
+  font-variation-settings: "BLND" var(--blend);
   font-size: 0.95rem;
   color: var(--color-text);
   text-decoration: none;
