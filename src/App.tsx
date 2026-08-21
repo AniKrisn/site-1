@@ -36,7 +36,7 @@ const projects: ProjectItem[] = [
     mobileHref: "/ligne-claire/",
   },
   {
-    title: "The ferryman",
+    title: "The Ferryman",
     // outbound rather than dropped into public/: it has an agent in it and
     // an API key behind a Worker, so it wants its own origin -- see the
     // "when a project should get its own deployment" note in CLAUDE.md
