@@ -28,6 +28,13 @@ const projects: ProjectItem[] = [
     slug: "/beetle/",
     mobileHref: "/beetle/",
   },
+  {
+    title: "Ligne claire",
+    slug: "/ligne-claire/",
+    // it runs on a phone too -- without a mobileHref the entry is hidden
+    // below 1024px, since that is where post-link-desktop stops showing
+    mobileHref: "/ligne-claire/",
+  },
 ];
 
 function App() {

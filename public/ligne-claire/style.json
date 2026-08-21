@@ -1,0 +1,628 @@
+{
+  "palette": {
+    "lc_water": {
+      "shadow": "#5C7488",
+      "lit": "#7E9BB0",
+      "mid": {
+        "color": "#708BA0",
+        "stop": 0.55
+      },
+      "lum": {
+        "file": "lum_ripple.png",
+        "scale": 0.12,
+        "strength": 0.6,
+        "center": 0.8,
+        "offsets": [
+          0.37,
+          0.19,
+          -0.16,
+          0.42
+        ],
+        "drift": [
+          0.02,
+          -0.01,
+          0.013,
+          -0.003
+        ]
+      }
+    },
+    "sand_isle": {
+      "shadow": "#C29A66",
+      "lit": "#E8C88F"
+    },
+    "lc_snow": {
+      "shadow": "#AFB2A2",
+      "lit": "#E7EADF"
+    },
+    "sand": {
+      "shadow": "#C29A66",
+      "lit": "#E8C88F"
+    },
+    "bone": {
+      "shadow": "#B3A68F",
+      "lit": "#D9CDB8"
+    },
+    "lc_wood_dark": {
+      "shadow": "#543420",
+      "lit": "#6E5138"
+    },
+    "lc_wood_light": {
+      "shadow": "#805735",
+      "lit": "#A9835B"
+    },
+    "lc_opening": {
+      "shadow": "#332A22",
+      "lit": "#3B3128"
+    },
+    "lc_neon_bluegrey_door_deep": {
+      "shadow": "#303237",
+      "lit": "#303237",
+      "flicker": [
+        0.05,
+        0.45,
+        0.025,
+        1.9
+      ]
+    },
+    "lc_neon_bluegrey_door": {
+      "shadow": "#46586E",
+      "lit": "#46586E",
+      "flicker": [
+        0.1,
+        0.45,
+        0.05,
+        1.9
+      ]
+    },
+    "lc_neon_yellow_w3_deep": {
+      "shadow": "#6E5B12",
+      "lit": "#6E5B12",
+      "flicker": [
+        0.04,
+        0.5,
+        0.02,
+        2.3
+      ]
+    },
+    "lc_neon_yellow_w3": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00",
+      "flicker": [
+        0.08,
+        0.5,
+        0.04,
+        2.3
+      ]
+    },
+    "lc_neon_pink_w0_deep": {
+      "shadow": "#6E263E",
+      "lit": "#6E263E",
+      "flicker": [
+        0.05,
+        0.9,
+        0.025,
+        3.1
+      ]
+    },
+    "lc_neon_pink_w0": {
+      "shadow": "#FF3483",
+      "lit": "#FF3483",
+      "flicker": [
+        0.1,
+        0.9,
+        0.05,
+        3.1
+      ]
+    },
+    "lc_roof_clay": {
+      "shadow": "#86321A",
+      "lit": "#B0603E"
+    },
+    "lc_steel": {
+      "shadow": "#596067",
+      "lit": "#7C8288"
+    },
+    "lc_neon_pink_w4_deep": {
+      "shadow": "#6E263E",
+      "lit": "#6E263E",
+      "flicker": [
+        0.045,
+        0.6,
+        0.02,
+        2.7
+      ]
+    },
+    "lc_neon_pink_w4": {
+      "shadow": "#FF3483",
+      "lit": "#FF3483",
+      "flicker": [
+        0.09,
+        0.6,
+        0.04,
+        2.7
+      ]
+    },
+    "lc_neon_yellow_w1_deep": {
+      "shadow": "#6E5B12",
+      "lit": "#6E5B12",
+      "flicker": [
+        0.04,
+        0.7,
+        0.025,
+        1.7
+      ]
+    },
+    "lc_neon_yellow_w1": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00",
+      "flicker": [
+        0.08,
+        0.7,
+        0.05,
+        1.7
+      ]
+    },
+    "terracotta": {
+      "shadow": "#96513C",
+      "lit": "#C96F4A"
+    },
+    "lc_neon_teal_w2_deep": {
+      "shadow": "#186151",
+      "lit": "#186151",
+      "flicker": [
+        0.06,
+        1.1,
+        0.03,
+        4.7
+      ]
+    },
+    "lc_neon_teal_w2": {
+      "shadow": "#00E0BA",
+      "lit": "#00E0BA",
+      "flicker": [
+        0.12,
+        1.1,
+        0.06,
+        4.7
+      ]
+    },
+    "lc_bush_a": {
+      "shadow": "#644D23",
+      "lit": "#837040"
+    },
+    "lc_pole": {
+      "shadow": "#69462A",
+      "lit": "#8A6A48"
+    },
+    "lc_brass": {
+      "shadow": "#996F31",
+      "lit": "#C9A55C"
+    },
+    "lc_neon_yellow": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00"
+    },
+    "lc_rope": {
+      "shadow": "#997955",
+      "lit": "#C9AE84"
+    },
+    "lc_pine": {
+      "shadow": "#43512B",
+      "lit": "#5A6B44"
+    },
+    "lc_neon_teal": {
+      "shadow": "#00E0BA",
+      "lit": "#00E0BA"
+    },
+    "lc_pole.001": {
+      "shadow": "#69462A",
+      "lit": "#8A6A48"
+    },
+    "lc_torii": {
+      "shadow": "#993B20",
+      "lit": "#C96F4A"
+    },
+    "lc_neon_pink_gate": {
+      "shadow": "#FF3483",
+      "lit": "#FF3483",
+      "flicker": [
+        0.1,
+        0.35,
+        0.04,
+        0.9
+      ]
+    },
+    "lc_shide": {
+      "shadow": "#B4AB9D",
+      "lit": "#EDE7DA"
+    },
+    "lc_neon_pink": {
+      "shadow": "#FF3483",
+      "lit": "#FF3483"
+    },
+    "lc_stone": {
+      "shadow": "#6B6358",
+      "lit": "#8D877B"
+    },
+    "lc_ice": {
+      "shadow": "#7F94A0",
+      "lit": "#B4C9D2"
+    },
+    "lc_moonglass": {
+      "shadow": "#677D89",
+      "lit": "#93AAB4"
+    },
+    "lc_neon_violet_gh2_deep": {
+      "shadow": "#491442",
+      "lit": "#491442",
+      "flicker": [
+        0.025,
+        0.32,
+        0.015,
+        1.3
+      ]
+    },
+    "lc_neon_violet_gh2": {
+      "shadow": "#91008D",
+      "lit": "#91008D",
+      "flicker": [
+        0.05,
+        0.32,
+        0.03,
+        1.3
+      ]
+    },
+    "lc_neon_violet_gh3_deep": {
+      "shadow": "#491442",
+      "lit": "#491442",
+      "flicker": [
+        0.03,
+        0.5,
+        0.01,
+        2.1
+      ]
+    },
+    "lc_neon_violet_gh3": {
+      "shadow": "#91008D",
+      "lit": "#91008D",
+      "flicker": [
+        0.06,
+        0.5,
+        0.02,
+        2.1
+      ]
+    },
+    "lc_neon_yellow_gh1_deep": {
+      "shadow": "#6E5B12",
+      "lit": "#6E5B12",
+      "flicker": [
+        0.04,
+        0.65,
+        0.02,
+        2.4
+      ]
+    },
+    "lc_neon_yellow_gh1": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00",
+      "flicker": [
+        0.08,
+        0.65,
+        0.04,
+        2.4
+      ]
+    },
+    "lc_pole.002": {
+      "shadow": "#69462A",
+      "lit": "#8A6A48"
+    },
+    "lc_neon_teal_ghvane": {
+      "shadow": "#00E0BA",
+      "lit": "#00E0BA"
+    },
+    "lc_smoke": {
+      "shadow": "#8D8577",
+      "lit": "#B9B4A6"
+    },
+    "lc_neon_pink_kf_deep": {
+      "shadow": "#6E263E",
+      "lit": "#6E263E",
+      "flicker": [
+        0.08,
+        0.9,
+        0.04,
+        3.1
+      ]
+    },
+    "lc_neon_pink_kf": {
+      "shadow": "#FF3483",
+      "lit": "#FF3483",
+      "flicker": [
+        0.16,
+        0.9,
+        0.08,
+        3.1
+      ]
+    },
+    "lc_neon_yellow_kd_deep": {
+      "shadow": "#6E5B12",
+      "lit": "#6E5B12",
+      "flicker": [
+        0.04,
+        0.55,
+        0.02,
+        2.7
+      ]
+    },
+    "lc_neon_yellow_kd": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00",
+      "flicker": [
+        0.08,
+        0.55,
+        0.04,
+        2.7
+      ]
+    },
+    "lc_glaze": {
+      "shadow": "#546F86",
+      "lit": "#7E9BB0"
+    },
+    "lc_grass_dry": {
+      "shadow": "#8D6E3A",
+      "lit": "#B99F63"
+    },
+    "lc_bush_b": {
+      "shadow": "#6C542C",
+      "lit": "#8E7A4B"
+    },
+    "lc_tag_0": {
+      "shadow": "#993B20",
+      "lit": "#C96F4A"
+    },
+    "lc_tag_1": {
+      "shadow": "#AD530B",
+      "lit": "#E39038"
+    },
+    "lc_tag_2": {
+      "shadow": "#B08B5A",
+      "lit": "#E8C88F"
+    },
+    "lc_tag_3": {
+      "shadow": "#994D61",
+      "lit": "#C97B93"
+    },
+    "lc_crane_white": {
+      "shadow": "#B1AC9E",
+      "lit": "#E9E6DA"
+    },
+    "lc_crane_dark": {
+      "shadow": "#2D2B34",
+      "lit": "#3E3C44"
+    },
+    "lc_crane_collar": {
+      "shadow": "#AD9D8B",
+      "lit": "#E3D7C4"
+    },
+    "lc_neon_bluegrey_lhd_deep": {
+      "shadow": "#303237",
+      "lit": "#303237",
+      "flicker": [
+        0.05,
+        0.5,
+        0.025,
+        2.1
+      ]
+    },
+    "lc_neon_bluegrey_lhd": {
+      "shadow": "#46586E",
+      "lit": "#46586E",
+      "flicker": [
+        0.1,
+        0.5,
+        0.05,
+        2.1
+      ]
+    },
+    "lc_neon_yellow_lhw": {
+      "shadow": "#FFCF00",
+      "lit": "#FFCF00",
+      "flicker": [
+        0.09,
+        0.7,
+        0.05,
+        2.9
+      ]
+    },
+    "lc_neon_teal_lhb": {
+      "shadow": "#00E0BA",
+      "lit": "#00E0BA",
+      "flicker": [
+        0.16,
+        0.3,
+        0.1,
+        0.75
+      ]
+    },
+    "lc_neon_teal_ff_deep": {
+      "shadow": "#186151",
+      "lit": "#186151",
+      "flicker": [
+        0.06,
+        0.4,
+        0.03,
+        1.1
+      ]
+    },
+    "lc_panel": {
+      "shadow": "#27384E",
+      "lit": "#3E5266"
+    },
+    "lc_stone_grey": {
+      "shadow": "#676D75",
+      "lit": "#8F949A"
+    },
+    "lc_stone_eye": {
+      "shadow": "#363A43",
+      "lit": "#4C5058"
+    },
+    "lc_stone_algae": {
+      "shadow": "#415141",
+      "lit": "#5C6A5D"
+    },
+    "lc_well_night": {
+      "shadow": "#1D203D",
+      "lit": "#2F3450"
+    },
+    "lc_neon_violet": {
+      "shadow": "#91008D",
+      "lit": "#91008D"
+    },
+    "lc_neon_violet_well": {
+      "shadow": "#91008D",
+      "lit": "#91008D",
+      "flicker": [
+        0.08,
+        0.28,
+        0.04,
+        0.7
+      ]
+    },
+    "lc_fish_back": {
+      "shadow": "#332C41",
+      "lit": "#464055"
+    },
+    "lc_fish_belly": {
+      "shadow": "#A47C7B",
+      "lit": "#D8B4B0"
+    },
+    "lc_boat_well": {
+      "shadow": "#2D221A",
+      "lit": "#3B3128"
+    },
+    "lc_firepit": {
+      "shadow": "#6B6358",
+      "lit": "#8D877B"
+    },
+    "lc_firepit_char": {
+      "shadow": "#312A23",
+      "lit": "#413B33"
+    },
+    "lc_flame": {
+      "shadow": "#E8A13E",
+      "lit": "#E8A13E",
+      "flicker": [
+        0.1,
+        1.1,
+        0.06,
+        4.3
+      ]
+    },
+    "lc_flame_core": {
+      "shadow": "#F7E7B3",
+      "lit": "#F7E7B3",
+      "flicker": [
+        0.05,
+        1.1,
+        0.03,
+        4.3
+      ]
+    },
+    "lc_fire_glow": {
+      "shadow": "#EFD9A6",
+      "lit": "#EFD9A6",
+      "flicker": [
+        0.05,
+        1.1,
+        0.03,
+        4.3
+      ]
+    },
+    "lc_flower_leaf": {
+      "shadow": "#644D23",
+      "lit": "#837040"
+    },
+    "lc_flower_petal": {
+      "shadow": "#AD530B",
+      "lit": "#E39038"
+    },
+    "lc_mtn_far": {
+      "shadow": "#97A9B6",
+      "lit": "#A3B5C1"
+    },
+    "lc_mtn_snow_far": {
+      "shadow": "#CDD5CC",
+      "lit": "#DDE3D8"
+    },
+    "lc_shallow": {
+      "shadow": "#98B3C6",
+      "lit": "#98B3C6"
+    },
+    "lc_mtn": {
+      "shadow": "#7E93A4",
+      "lit": "#8CA1B0"
+    },
+    "lc_cable": {
+      "shadow": "#292E34",
+      "lit": "#3A3F45"
+    },
+    "lc_gauge_water": {
+      "shadow": "#546F86",
+      "lit": "#7E9BB0"
+    },
+    "lc_cloud": {
+      "shadow": "#E9E5D4",
+      "lit": "#FBFAF2"
+    },
+    "lc_sun": {
+      "shadow": "#F0DCA8",
+      "lit": "#F0DCA8"
+    },
+    "lc_bird": {
+      "shadow": "#332A22",
+      "lit": "#3B3128"
+    }
+  },
+  "sky": "#F5F0E6",
+  "skyBands": [
+    [
+      "#FAF6EC",
+      0.8
+    ],
+    [
+      "#F9F5EB",
+      0.91
+    ],
+    [
+      "#F8F4E9",
+      1.0
+    ]
+  ],
+  "threshold": 0.3,
+  "ditherStrength": 0.15,
+  "ditherScale": 2,
+  "hatch": {
+    "enabled": true,
+    "scale": 7,
+    "angle": 45
+  },
+  "lineThickness": 2,
+  "lightDir": [
+    0.710264,
+    -0.642788,
+    -0.286965
+  ],
+  "camera": {
+    "position": [
+      22.5,
+      11.6,
+      19.5
+    ],
+    "target": [
+      -4.4,
+      2.8,
+      4.9
+    ],
+    "fov": 26.99
+  }
+}

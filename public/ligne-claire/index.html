@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>ligne claire — a drawn village</title>
+    <meta
+      name="description"
+      content="A snowbound village rendered in flat colour and ink: Blender builds it headless, three.js draws it live in the browser."
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <meta property="og:title" content="ligne claire — a drawn village" />
+    <meta
+      property="og:description"
+      content="A snowbound village rendered in flat colour and ink: Blender builds it headless, three.js draws it live in the browser."
+    />
+    <meta property="og:type" content="website" />
+    <script type="module" crossorigin src="./assets/index-CH0ECApn.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CTnn5OmZ.css">
+  </head>
+  <body>
+    <div id="err"></div>
+    <script>
+      // the viewer has no console for a visitor: anything thrown lands here
+      const errBox = document.getElementById("err");
+      errBox.style.cssText =
+        "position:fixed;left:8px;bottom:8px;max-width:90vw;z-index:50;" +
+        "font:12px monospace;color:#fff;background:#a00;padding:4px 8px;" +
+        "white-space:pre-wrap;display:none";
+      function showErr(msg) {
+        errBox.style.display = "block";
+        errBox.textContent += msg + "\n";
+      }
+      window.onerror = (m, s, l) => showErr(`${m} (${s}:${l})`);
+      window.onunhandledrejection = (e) => showErr(String(e.reason));
+      const origErr = console.error.bind(console);
+      console.error = (...a) => {
+        showErr(a.map(String).join(" ").slice(0, 2000));
+        origErr(...a);
+      };
+    </script>
+  </body>
+</html>
