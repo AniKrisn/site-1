@@ -32,7 +32,9 @@ Two things that will bite:
   while `/ligne-claire` would look for `/scene.glb` and 404.
 
 Titles are sentence case here — Code editor, Beetle, Ligne claire — even
-where the project styles itself lowercase inside.
+where the project styles itself lowercase inside. The exception is a name
+that is a title in its own right: The Ferryman keeps its capital, because
+that is how it is set on its own page and in its tab.
 
 ## Updating ligne-claire
 
