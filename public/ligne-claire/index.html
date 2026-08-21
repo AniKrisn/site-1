@@ -6,31 +6,35 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>ligne claire — a drawn village</title>
-    <meta
-      name="description"
-      content="A snowbound village rendered in flat colour and ink: Blender builds it headless, three.js draws it live in the browser."
-    />
+    <title>Ligne claire</title>
+    <meta name="description" content="Sketched headlessly with Blender. Inspired by the ‘ligne claire’ style popularised by Hergé and the ideas of magical realism and karakuri animism." />
     <meta name="theme-color" content="#ffffff" />
-    <meta property="og:title" content="ligne claire — a drawn village" />
-    <meta
-      property="og:description"
-      content="A snowbound village rendered in flat colour and ink: Blender builds it headless, three.js draws it live in the browser."
-    />
+    <meta property="og:title" content="Ligne claire" />
+    <meta property="og:description" content="Sketched headlessly with Blender. Inspired by the ‘ligne claire’ style popularised by Hergé and the ideas of magical realism and karakuri animism." />
     <meta property="og:type" content="website" />
-    <script type="module" crossorigin src="./assets/index-CH0ECApn.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CTnn5OmZ.css">
+    <meta property="og:url" content="https://anikrisn.com/ligne-claire/" />
+    <meta property="og:image" content="https://anikrisn.com/ligne-claire/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="675" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="module" crossorigin src="./assets/index-D9ZywEpJ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BMBwV5RU.css">
   </head>
   <body>
     <div id="err"></div>
     <script>
-      // the viewer has no console for a visitor: anything thrown lands here
+      // The viewer has no console, so anything thrown lands here -- but a
+      // red box quoting a stack trace is not something a visitor should
+      // ever be shown, and cross-origin scripts report as a bare "Script
+      // error." that says nothing to anyone. It is a ?dev=1 tool.
+      const DEBUG = new URLSearchParams(location.search).get("dev") === "1";
       const errBox = document.getElementById("err");
       errBox.style.cssText =
         "position:fixed;left:8px;bottom:8px;max-width:90vw;z-index:50;" +
         "font:12px monospace;color:#fff;background:#a00;padding:4px 8px;" +
         "white-space:pre-wrap;display:none";
       function showErr(msg) {
+        if (!DEBUG) return;
         errBox.style.display = "block";
         errBox.textContent += msg + "\n";
       }
