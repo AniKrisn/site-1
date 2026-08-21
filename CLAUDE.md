@@ -38,9 +38,9 @@ that is how it is set on its own page and in its tab.
 
 ## Updating ligne-claire
 
-It lives at `~/Documents/code/ligne-claire` (branch
-`claude/minimal-showcase-version-7fb9f3`, in a worktree under
-`.claude/worktrees/`). To ship a change:
+It lives at `~/Documents/code/ligne-claire` (private repo
+`AniKrisn/ligne-claire`, branch `minimal-showcase`, checked out in a
+worktree under `.claude/worktrees/`). To ship a change:
 
 ```bash
 cd ~/Documents/code/ligne-claire/.claude/worktrees/minimal-showcase-version-7fb9f3
