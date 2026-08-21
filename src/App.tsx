@@ -35,6 +35,16 @@ const projects: ProjectItem[] = [
     // below 1024px, since that is where post-link-desktop stops showing
     mobileHref: "/ligne-claire/",
   },
+  {
+    title: "The ferryman",
+    // outbound rather than dropped into public/: it has an agent in it and
+    // an API key behind a Worker, so it wants its own origin -- see the
+    // "when a project should get its own deployment" note in CLAUDE.md
+    slug: "https://ferryman.anikrisn.com/",
+    // on a phone it shows a die to throw and says to come back on a
+    // larger screen, so the entry should still be there
+    mobileHref: "https://ferryman.anikrisn.com/",
+  },
 ];
 
 function App() {
