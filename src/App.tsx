@@ -17,14 +17,7 @@ const posts: LinkItem[] = [
   { title: "Descriptions", slug: "/descriptions" },
 ];
 
-const projects: ProjectItem[  {
-    title: "Marks (wip)",
-    slug: "/marks/",
-    // needs a wide screen, but it loads anywhere and the repo is private,
-    // so the phone gets the same page rather than a 404
-    mobileHref: "/marks/",
-  },
-] = [
+const projects: ProjectItem[] = [
   {
     title: "Code editor",
     slug: "/code-editor/",
@@ -51,6 +44,13 @@ const projects: ProjectItem[  {
     // on a phone it shows a die to throw and says to come back on a
     // larger screen, so the entry should still be there
     mobileHref: "https://ferryman.anikrisn.com/",
+  },
+  {
+    title: "Marks (wip)",
+    slug: "/marks/",
+    // needs a wide screen, but it loads anywhere and the repo is private,
+    // so the phone gets the same page rather than a 404
+    mobileHref: "/marks/",
   },
 ];
 
