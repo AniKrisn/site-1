@@ -19,6 +19,13 @@ const posts: LinkItem[] = [
 
 const projects: ProjectItem[] = [
   {
+    title: "Marks (wip)",
+    slug: "/marks/",
+    // needs a wide screen, but it loads anywhere and the repo is private,
+    // so the phone gets the same page rather than a 404
+    mobileHref: "/marks/",
+  },
+  {
     title: "Code editor",
     slug: "/code-editor/",
     mobileHref: "https://github.com/AniKrisn/code-editor/",
