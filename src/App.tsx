@@ -19,13 +19,6 @@ const posts: LinkItem[] = [
 
 const projects: ProjectItem[] = [
   {
-    title: "sketch harness (wip)",
-    slug: "/sketch-harness/",
-    // the instrument needs a wide screen, but it loads anywhere and the
-    // repo is private, so the phone gets the same page rather than a 404
-    mobileHref: "/sketch-harness/",
-  },
-  {
     title: "Code editor",
     slug: "/code-editor/",
     mobileHref: "https://github.com/AniKrisn/code-editor/",
