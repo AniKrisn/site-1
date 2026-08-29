@@ -216,3 +216,6 @@ window.addEventListener('load', () => {
   };
   next(); next(); next();
 });
+
+// pull the canvas bundle in the background too, so the toggle is instant
+window.addEventListener('load', () => { boardMod ??= import('./board.js'); });

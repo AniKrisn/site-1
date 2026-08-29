@@ -3,10 +3,11 @@
 import React from 'https://esm.sh/react@18.3.1'
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1'
 import {
-  Tldraw, AssetRecordType, createShapeId, toRichText, react,
+  Tldraw, AssetRecordType, createShapeId, toRichText, react, Box,
 } from 'https://esm.sh/tldraw@3.15.1?deps=react@18.3.1,react-dom@18.3.1'
 
 let root = null
+let mountToken = 0
 
 // tldraw.css is only needed here, so it stays out of the page head
 const css = new Promise(resolve => {
@@ -56,9 +57,24 @@ export async function mountBoard(container, items, onPick) {
       }
     }
     editor.createAssets(assets)
-    editor.createShapes(shapes)
-    editor.zoomToFit()
-    editor.updateInstanceState({ isReadonly: true })
+
+    // aim the camera first, then stream the shapes in over a few frames
+    // so the canvas paints right away instead of blocking on all 157
+    const minX = Math.min(...items.map(it => it.x))
+    const minY = Math.min(...items.map(it => it.y))
+    const maxX = Math.max(...items.map(it => it.x + it.w))
+    const maxY = Math.max(...items.map(it => it.y + it.h))
+    editor.zoomToBounds(new Box(minX, minY, maxX - minX, maxY - minY), { inset: 64 })
+
+    const token = ++mountToken
+    let i = 0
+    const step = () => {
+      if (token !== mountToken) return
+      editor.createShapes(shapes.slice(i, i += 20))
+      if (i < shapes.length) setTimeout(step, 32)
+      else editor.updateInstanceState({ isReadonly: true })
+    }
+    step()
     editor.user.updateUserPreferences({ colorScheme: 'light' })
 
     // selecting a work opens its plate
@@ -83,5 +99,6 @@ export async function mountBoard(container, items, onPick) {
 }
 
 export function unmountBoard() {
+  mountToken++
   if (root) { root.unmount(); root = null }
 }
