@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cache</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/tldraw@3.15.1/tldraw.css">
+</head>
+<body>
+<header id="hdr">
+  <div class="hdr-cell title">Cache</div>
+  <nav class="hdr-cell right">
+    <button id="modeBtn"></button>
+    <button id="viewBtn"></button>
+  </nav>
+</header>
+
+<main id="main"></main>
+
+<div id="plate" hidden>
+  <section class="plate" id="plateInner"></section>
+  <button id="plClose" aria-label="close">×</button>
+</div>
+
+<div id="lightbox" hidden>
+  <img id="lbImg" alt="">
+  <div id="lbCap"></div>
+  <button id="lbPrev" aria-label="previous">←</button>
+  <button id="lbNext" aria-label="next">→</button>
+  <button id="lbClose" aria-label="close">×</button>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

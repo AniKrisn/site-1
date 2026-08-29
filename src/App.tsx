@@ -52,6 +52,11 @@ const projects: ProjectItem[] = [
     // so the phone gets the same page rather than a 404
     mobileHref: "/marks/",
   },
+  {
+    title: "Cache",
+    slug: "/cache/",
+    mobileHref: "/cache/",
+  },
 ];
 
 function App() {
