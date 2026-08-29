@@ -97,8 +97,10 @@ export function mountBoard(container, items, onPick) {
 
   /* pointers: one drags, two pinch; a still click on a work opens its plate */
   const pts = new Map()
-  let moved = false
+  let moved = false, downEl = null
   const onDown = e => {
+    // capture retargets later events to the view, so keep the real target now
+    downEl = e.target
     try { view.setPointerCapture(e.pointerId) } catch { /* already released */ }
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (pts.size === 1) moved = false
@@ -134,7 +136,7 @@ export function mountBoard(container, items, onPick) {
     pts.delete(e.pointerId)
     if (!pts.size) view.classList.remove('dragging')
     if (!moved && e.type === 'pointerup') {
-      const cell = e.target.closest?.('.bd-item')
+      const cell = downEl?.closest?.('.bd-item')
       if (cell) onPick?.(+cell.dataset.n)
     }
   }

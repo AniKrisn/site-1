@@ -113,7 +113,7 @@ function renderIndexStage() {
     frame.style.height = (mt + h) + 'px';
     // thumb paints at once; the full only fetches after the cursor rests,
     // so sweeping the list doesn't queue a pile of megabyte requests
-    progressive(stageImg, it, 150);
+    progressive(stageImg, it, 80);
     // once settled, warm the rows either side — hovers tend to be neighbours
     clearTimeout(nbTimer);
     nbTimer = setTimeout(() => {
