@@ -203,3 +203,16 @@ document.addEventListener('keydown', e => {
 let rsz; window.addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(render, 150); });
 
 render();
+
+// warm the thumb cache once the page is up, so hovers don't wait on the network
+window.addEventListener('load', () => {
+  const queue = items.map(it => `img/thumb/${it.img}.jpg`);
+  const next = () => {
+    const src = queue.shift();
+    if (!src) return;
+    const im = new Image();
+    im.onload = im.onerror = next;
+    im.src = src;
+  };
+  next(); next(); next();
+});

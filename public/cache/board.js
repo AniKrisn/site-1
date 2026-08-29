@@ -8,11 +8,21 @@ import {
 
 let root = null
 
+// tldraw.css is only needed here, so it stays out of the page head
+const css = new Promise(resolve => {
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = 'https://unpkg.com/tldraw@3.15.1/tldraw.css'
+  link.onload = link.onerror = resolve
+  document.head.append(link)
+})
+
 // same key the code editor ships; locked to *.anikrisn.com
 const LICENSE_KEY =
   'tldraw-2031-05-04/WyJwYkFiRF9nYiIsWyIqLmFuaWtyaXNuLmNvbSJdLDksIjIwMzEtMDUtMDQiXQ.CS3+s2htHT+HSMOeL5DkZegH5Io/oDQFj6SwCtz9ElSuEfJTyzsK7O3rQg3bkWs2xE0whupSvrw5nqI+hP0puw'
 
-export function mountBoard(container, items, onPick) {
+export async function mountBoard(container, items, onPick) {
+  await css
   const onMount = (editor) => {
     const assets = []
     const shapes = []
