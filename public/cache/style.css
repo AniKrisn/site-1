@@ -93,6 +93,7 @@ body.grid #plate .plate {
   #hdr { grid-template-columns: repeat(4, 1fr); }
   .hdr-cell.title { grid-column: 1 / span 1; }
   .hdr-cell.right { grid-column: 2 / span 3; }
+  #gridBtn { display: none; }  /* the grid is a desktop instrument */
 }
 
 main { min-height: 80vh; }
