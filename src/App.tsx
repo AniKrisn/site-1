@@ -53,7 +53,7 @@ const projects: ProjectItem[] = [
     mobileHref: "/marks/",
   },
   {
-    title: "Cache (wip)",
+    title: "Cache",
     slug: "/cache/",
     mobileHref: "/cache/",
   },
