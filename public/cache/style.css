@@ -87,7 +87,7 @@ body.grid #plate .plate {
   background-attachment: local;
 }
 #hdr nav button { color: var(--grey); }
-#hdr nav button:hover, #hdr nav button.on { color: var(--red); }
+#hdr nav button:hover { color: var(--red); }
 
 @media (max-width: 900px) {
   #hdr { grid-template-columns: repeat(4, 1fr); }
@@ -210,18 +210,6 @@ main { min-height: 80vh; }
   text-align: left;
   width: max-content; max-width: 120%;
 }
-/* century numerals on the time wall: the g's serif, set huge and ghosted */
-.bd-mark {
-  position: absolute;
-  display: flex; align-items: flex-end;
-  font-family: "Hoefler Text", Didot, Georgia, serif;
-  font-style: italic;
-  font-size: 240px; line-height: .82;
-  color: var(--line);
-  pointer-events: none; user-select: none; -webkit-user-select: none;
-  opacity: 0; transition: opacity .9s;
-}
-.bd-mark.in { opacity: 1; }
 
 /* ---- cursor-mode preview + mode toggle ---- */
 .v-index.cursor .idx-list { grid-column: 1 / -1; }

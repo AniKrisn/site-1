@@ -216,9 +216,6 @@ function render() {
   $('#viewBtn').textContent = state.view === 'index' ? 'canvas' : 'index';
   $('#modeBtn').textContent = state.idxMode === 'cursor' ? 'stage' : 'cursor';
   $('#modeBtn').classList.toggle('hide', state.view !== 'index');
-  // the board's other orders only make sense over the board
-  $('#arrTime').classList.toggle('hide', state.view !== 'board');
-  $('#arrColor').classList.toggle('hide', state.view !== 'board');
 }
 /* ---------- grid overlay ---------- */
 const overlay = $('#gridOverlay');
@@ -239,8 +236,6 @@ $('#modeBtn').addEventListener('click', () => {
   state.idxMode = state.idxMode === 'cursor' ? 'stage' : 'cursor';
   render();
 });
-$('#arrTime').addEventListener('click', () => boardMod?.then(m => m.toggleArrangement('time')));
-$('#arrColor').addEventListener('click', () => boardMod?.then(m => m.toggleArrangement('color')));
 document.addEventListener('keydown', e => {
   if (e.target.matches?.('input,textarea')) return;
   if (e.key === 'g') toggleGrid();
