@@ -1,0 +1,4 @@
+# Cache's images are named by content hash, so they can cache forever —
+# without this Pages serves max-age=300 and every visit re-downloads them.
+/cache/img/*
+  Cache-Control: public, max-age=31536000, immutable

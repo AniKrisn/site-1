@@ -15,10 +15,25 @@ function capHtml(it) {
   const t = it.title ? `<span class="t">${esc(it.title)}</span>` : '';
   const a = it.artist ? esc(it.artist) : '';
   const y = it.year ? ` <span class="y">${esc(it.year)}</span>` : '';
-  if (!t && !a) return '<span class="t">untitled</span>';
+  if (!t && !a) return '';
   return [t, t && a ? ' — ' : '', a, y].join('');
 }
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* show the (cached) thumb at once, swap in the full when it arrives.
+   token guards against a stale full landing after the target moved on. */
+function progressive(imgEl, it, delay = 0) {
+  const token = (imgEl._tok = (imgEl._tok || 0) + 1);
+  imgEl.src = `img/thumb/${it.img}.jpg`;
+  const start = () => {
+    if (token !== imgEl._tok) return;
+    const full = new Image();
+    full.onload = () => { if (token === imgEl._tok) imgEl.src = full.src; };
+    full.src = `img/full/${it.img}.jpg`;
+  };
+  delay ? setTimeout(start, delay) : start();
+}
+function preloadFull(it) { if (it) new Image().src = `img/full/${it.img}.jpg`; }
 
 /* ---------- index ----------
    Two modes. cursor: hover previews near the cursor, click opens the centre.
@@ -31,7 +46,7 @@ function renderIndex() {
 function idxRows(list) {
   return list.map(it => `<tr data-n="${it.n}" tabindex="0">
     <td class="no">${String(it.n).padStart(3, '0')}</td>
-    <td class="title">${it.title ? esc(it.title) : '<span class="unt">untitled</span>'}</td>
+    <td class="title">${esc(it.title || '')}</td>
     <td class="artist">${esc(it.artist || '')}</td>
     <td class="year">${esc(it.year || '')}</td>
   </tr>`).join('');
@@ -79,10 +94,32 @@ function renderIndexStage() {
   const stageCap = wrap.querySelector('#stageCap');
   const frame = wrap.querySelector('#stageFrame');
 
-  let shown = null;
+  let shown = null, nbTimer;
+  const BASE = 24, GUT = 16, STAGE_COLS = 7;
   function show(it) {
     shown = it;
-    stageImg.src = `img/full/${it.img}.jpg`;
+    // snap the image to the grid: whole columns wide, whole baselines tall
+    const stage = wrap.querySelector('.idx-stage');
+    const availH = stage.clientHeight - BASE - 2 * BASE;   // top pad + caption
+    const colW = (stage.clientWidth - (STAGE_COLS - 1) * GUT) / STAGE_COLS;
+    let k = STAGE_COLS;
+    while (k > 1 && (colW * k + GUT * (k - 1)) / it.ar > availH) k--;
+    const w = Math.round(colW * k + GUT * (k - 1));
+    const h = Math.max(BASE, Math.floor(Math.min(availH, w / it.ar) / BASE) * BASE);
+    const mt = Math.max(0, Math.floor((availH - h) / 2 / BASE) * BASE);
+    stageImg.style.width = w + 'px';
+    stageImg.style.height = h + 'px';
+    stageImg.style.marginTop = mt + 'px';
+    frame.style.height = (mt + h) + 'px';
+    // thumb paints at once; the full only fetches after the cursor rests,
+    // so sweeping the list doesn't queue a pile of megabyte requests
+    progressive(stageImg, it, 150);
+    // once settled, warm the rows either side — hovers tend to be neighbours
+    clearTimeout(nbTimer);
+    nbTimer = setTimeout(() => {
+      preloadFull(list[it.n % list.length]);
+      preloadFull(list[(it.n - 2 + list.length) % list.length]);
+    }, 600);
     stageCap.innerHTML = `<span class="no">${String(it.n).padStart(3, '0')}</span>
       ${it.title ? `<span class="t">${esc(it.title)}</span>` : ''}
       <span class="a">${esc(it.artist || '')}</span>
@@ -95,8 +132,8 @@ function renderIndexStage() {
   frame.addEventListener('click', () => { if (shown) openPlate(shown.n); });
 
   indexKeyHandler = null;
-  show(list[0]);
   main.replaceChildren(wrap);
+  show(list[0]);   // after attach: snapping needs real clientWidth
 }
 let indexKeyHandler = null;
 
@@ -118,8 +155,11 @@ function showPlate() {
       <span class="a">${esc(it.artist || '')}</span>
       ${it.year ? `<span class="y">${esc(it.year)}</span>` : ''}
     </div>
-    <div class="pimg"><img src="img/full/${it.img}.jpg" alt="${esc(it.title || it.artist || 'artwork')}"></div>`;
+    <div class="pimg"><img decoding="async" alt="${esc(it.title || it.artist || 'artwork')}"></div>`;
+  progressive($('#plateInner .pimg img'), it);
   plateEl.hidden = false;
+  preloadFull(plList[(plIdx + 1) % plList.length]);
+  preloadFull(plList[(plIdx - 1 + plList.length) % plList.length]);
 }
 function stepPlate(d) { plIdx = (plIdx + d + plList.length) % plList.length; showPlate(); }
 $('#plClose').addEventListener('click', () => plateEl.hidden = true);
@@ -127,7 +167,7 @@ plateEl.addEventListener('click', e => {
   if (!e.target.closest('.pimg img')) plateEl.hidden = true;
 });
 
-/* ---------- board: the original canvas in <Tldraw>, chrome hidden ---------- */
+/* ---------- board: the original canvas, hand-rolled pan/zoom ---------- */
 let boardMod = null;
 function renderBoard() {
   main.className = '';
@@ -155,7 +195,9 @@ function openLightbox(it) {
 }
 function showLb() {
   const it = lbList[lbIdx];
-  $('#lbImg').src = `img/full/${it.img}.jpg`;
+  progressive($('#lbImg'), it);
+  preloadFull(lbList[(lbIdx + 1) % lbList.length]);
+  preloadFull(lbList[(lbIdx - 1 + lbList.length) % lbList.length]);
   $('#lbCap').innerHTML = `${it.title ? `<span class="t">${esc(it.title)}</span>` : ''}
     <span class="a">${esc(it.artist || '')}</span>
     ${it.year ? `<span class="y">${esc(it.year)}</span>` : ''}`;
@@ -175,6 +217,16 @@ function render() {
   $('#modeBtn').textContent = state.idxMode === 'cursor' ? 'stage' : 'cursor';
   $('#modeBtn').classList.toggle('hide', state.view !== 'index');
 }
+/* ---------- grid overlay ---------- */
+const overlay = $('#gridOverlay');
+overlay.innerHTML = `<div class="cols">${'<div class="col"></div>'.repeat(12)}</div>`;
+function toggleGrid() {
+  overlay.hidden = !overlay.hidden;
+  document.body.classList.toggle('grid', !overlay.hidden);
+  $('#gridBtn').classList.toggle('on', !overlay.hidden);
+}
+$('#gridBtn').addEventListener('click', toggleGrid);
+
 // each toggle names where it takes you, and swaps
 $('#viewBtn').addEventListener('click', () => {
   state.view = state.view === 'index' ? 'board' : 'index';
@@ -186,6 +238,7 @@ $('#modeBtn').addEventListener('click', () => {
 });
 document.addEventListener('keydown', e => {
   if (e.target.matches?.('input,textarea')) return;
+  if (e.key === 'g') toggleGrid();
   if (!lb.hidden) {
     if (e.key === 'Escape') lb.hidden = true;
     if (e.key === 'ArrowLeft') $('#lbPrev').click();

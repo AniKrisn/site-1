@@ -3,7 +3,8 @@
 :root {
   --cols: 12;
   --gut: 16px;
-  --mod: 8px;               /* baseline module */
+  --mod: 8px;               /* horizontal spacing module */
+  --base: 24px;             /* the baseline: one constant, repeating forever */
   --margin: 24px;
   --ink: #111;
   --paper: #fff;
@@ -35,16 +36,56 @@ button {
   display: grid;
   grid-template-columns: repeat(var(--cols), 1fr);
   gap: 0 var(--gut);
-  padding: var(--mod) var(--margin);
+  height: calc(var(--base) * 2);   /* border included: content below starts on the grid */
+  padding: 0 var(--margin);
   border-bottom: 1px solid var(--ink);
   position: sticky; top: 0; background: var(--paper); z-index: 20;
   align-items: center;
-  min-height: 48px;
 }
 .hdr-cell.title { grid-column: 1 / span 4; font-weight: 700; }
 .hdr-cell.title .sub { font-weight: 400; color: var(--grey); margin-left: 12px; }
 .hdr-cell.right { grid-column: 11 / span 2; text-align: right; }
 .hdr-cell.right button { margin-left: 16px; }
+/* the g: an italic serif superscript leading the wordmark */
+#gridBtn {
+  font-family: "Hoefler Text", Didot, Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--grey);
+  position: relative;
+  top: -0.45em;
+  margin-right: 3px;
+}
+#gridBtn:hover, #gridBtn.on { color: var(--red); }
+
+/* the grid itself: 12 columns, 8px baseline, red, over everything */
+#gridOverlay {
+  position: fixed; inset: 0; z-index: 60; pointer-events: none;
+  padding: 0 var(--margin);
+}
+#gridOverlay .cols {
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  gap: 0 var(--gut);
+}
+#gridOverlay .col {
+  background: rgba(224, 37, 14, 0.05);
+  border-left: 1px solid rgba(224, 37, 14, .35);
+  border-right: 1px solid rgba(224, 37, 14, .35);
+}
+/* baselines belong to the document, not the viewport: drawn on the containers,
+   scrolling with their content (background-attachment: local) */
+body.grid .idx-list,
+body.grid .idx-stage,
+body.grid #plate .plate {
+  background-image: repeating-linear-gradient(
+    to bottom, rgba(224, 37, 14, .28) 0 1px, transparent 1px var(--base));
+  background-position: 0 -1px; /* row borders draw one pixel above the 24k line */
+  background-attachment: local;
+}
 #hdr nav button { color: var(--grey); }
 #hdr nav button:hover { color: var(--red); }
 
@@ -62,41 +103,40 @@ main { min-height: 80vh; }
   grid-template-columns: repeat(var(--cols), 1fr);
   gap: 0 var(--gut);
   padding: 0 var(--margin);
-  height: calc(100dvh - 49px);
+  height: calc(100dvh - 48px);
   overflow: hidden;
 }
 .idx-list {
   grid-column: 1 / span 5;
   overflow-y: auto;
-  height: calc(100dvh - 49px);
-  padding: calc(var(--mod) * 3) 0 calc(var(--mod) * 8);
+  height: calc(100dvh - 48px);
+  padding: var(--base) 0 calc(var(--base) * 4);
   scrollbar-width: none;
+  scroll-snap-type: y mandatory;   /* the scroll itself obeys the grid */
 }
+.idx-list tr { scroll-snap-align: start; }
 .idx-list::-webkit-scrollbar { display: none; }
-.idx-list table { width: 100%; border-collapse: collapse; }
-.idx-list tr { border-bottom: 1px solid var(--line); }
+.idx-list table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+
 .v-index.cursor .idx-list tr { cursor: pointer; }
 .idx-list tr:hover td { color: var(--red); }
-.idx-list td { padding: 5px 16px 5px 0; vertical-align: baseline; }
-.idx-list td.no { color: var(--grey); width: 4ch; font-variant-numeric: tabular-nums; }
+.idx-list td { padding: 10px 16px 0 0; line-height: 13px; vertical-align: baseline; border-bottom: 1px solid var(--line);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* a row is one baseline, always */
+.idx-list td.no { color: var(--grey); width: 48px; font-variant-numeric: tabular-nums; }
 .idx-list td.title { width: 45%; }
-.idx-list td.year { color: var(--grey); text-align: right; padding-right: 0; }
+.idx-list td.year { color: var(--grey); text-align: right; padding-right: 0; width: 72px; }
 .idx-list .unt { color: var(--grey); }
 .idx-list tr:focus { outline: none; }
 
 .idx-stage {
   grid-column: 6 / span 7;
-  height: calc(100dvh - 49px);
-  display: flex; flex-direction: column;
-  padding: calc(var(--mod) * 3) 0 calc(var(--mod) * 2);
+  height: calc(100dvh - 48px);
+  padding: var(--base) 0 0;
+  overflow: hidden;
 }
-.stage-frame {
-  flex: 1; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-}
-.stage-frame img { max-width: 100%; max-height: 100%; display: block; }
-.stage-cap { padding-top: var(--mod); min-height: 48px; }
+.stage-frame { cursor: pointer; display: flow-root; }  /* contain the image margin, no collapse */
+.stage-frame img { display: block; object-fit: cover; }  /* left edge on the column, not centered */
+.stage-cap { padding-top: 10px; line-height: 13px; height: calc(var(--base) * 2); overflow: hidden; }
 .stage-cap .no { color: var(--red); margin-right: 12px; font-variant-numeric: tabular-nums; }
 .stage-cap .t { font-weight: 700; margin-right: 8px; }
 .stage-cap .a { margin-right: 8px; }
@@ -106,14 +146,14 @@ main { min-height: 80vh; }
   .v-index { grid-template-columns: repeat(4, 1fr); }
   .idx-list td { padding: 6px 8px 6px 0; }
   .idx-list td.title { width: 40%; }
-  .idx-list { grid-column: 1 / -1; height: calc((100dvh - 49px) * .4); }
-  .v-index.cursor .idx-list { height: calc(100dvh - 49px); }
-  .idx-stage { grid-column: 1 / -1; height: calc((100dvh - 49px) * .6); }
+  .idx-list { grid-column: 1 / -1; height: calc((100dvh - 48px) * .4); }
+  .v-index.cursor .idx-list { height: calc(100dvh - 48px); }
+  .idx-stage { grid-column: 1 / -1; height: calc((100dvh - 48px) * .6); }
 }
 
 /* ---- plate (overlay geometry lives under #plate below) ---- */
 .plate {
-  height: calc(100dvh - 49px);
+  height: calc(100dvh - 48px);
   display: grid;
   grid-template-columns: repeat(var(--cols), 1fr);
   gap: 0 var(--gut);
@@ -140,18 +180,35 @@ main { min-height: 80vh; }
   .plate .pcap .no { margin-bottom: 4px; }
 }
 
-/* ---- board view: <Tldraw hideUi> fills it ---- */
+/* ---- board view: hand-rolled pan/zoom canvas fills it ---- */
 .v-board {
   position: relative;
-  isolation: isolate; /* keep the tldraw watermark's z-index inside the board so overlays paint above it */
-  height: calc(100dvh - 49px);
+  height: calc(100dvh - 48px);
   overflow: hidden;
   color: var(--grey);
   display: flow-root;
   text-align: center;
-  line-height: calc(100dvh - 49px);
+  line-height: calc(100dvh - 48px);
 }
 .v-board > div { line-height: 16px; text-align: left; }
+.bd-view {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none; /* pointer events handle pan/pinch themselves */
+}
+.bd-view.dragging { cursor: grabbing; }
+.bd-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.bd-item { position: absolute; cursor: pointer; }
+.bd-item img { display: block; width: 100%; }
+.bd-cap {
+  margin-top: 8px;
+  font: 12px/16px -apple-system, system-ui, sans-serif;
+  color: var(--grey);
+  white-space: pre-line;
+  text-align: left;
+  width: max-content; max-width: 120%;
+}
 
 /* ---- cursor-mode preview + mode toggle ---- */
 .v-index.cursor .idx-list { grid-column: 1 / -1; }
