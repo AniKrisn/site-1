@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;700&display=swap");
 
 .post-content {
   flex-direction: column;
@@ -5,7 +6,8 @@
 }
 
 .post-text {
-  font-family: var(--font-body);
+  font-family: var(--font-mono);
+  font-variation-settings: "BLND" var(--blend);
   font-size: 0.95rem;
   color: var(--color-text);
   max-width: 60ch;
