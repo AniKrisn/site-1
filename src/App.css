@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap");
 
 /* Text anchors to the card's top-left corner: an equal 96px (12u) inset from
    the card's inner edge on both axes, strong left axis, air to the right. */
@@ -144,8 +143,7 @@
 
 .section-title {
   position: relative;
-  font-family: var(--font-mono);
-  font-variation-settings: "BLND" var(--blend);
+  font-family: var(--font-body);
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--color-text);
@@ -155,8 +153,7 @@
 }
 
 .post-link {
-  font-family: var(--font-mono);
-  font-variation-settings: "BLND" var(--blend);
+  font-family: var(--font-body);
   font-size: 0.95rem;
   color: var(--color-text);
   text-decoration: none;

@@ -1,22 +1,11 @@
-/* Crossfade Mono: one variable axis, BLND 0-100, interpolating Geist Mono
-   into Playfair Display on the monospaced grid. 37 is the setting this site
-   uses -- serif enough to read as drawn, still a code face. Both sources are
-   SIL OFL 1.1; see public/fonts/CrossfadeMono-OFL.txt. */
-@font-face {
-  font-family: "Crossfade Mono";
-  src: url("/fonts/CrossfadeMono-VF.woff2") format("woff2-variations");
-  font-weight: 400;
-  font-display: swap;
-}
+@import url("https://fonts.googleapis.com/css2?family=Faculty+Glyphic&display=swap");
 
 :root {
-  --font-mono: "Crossfade Mono", "Geist Mono", ui-monospace, monospace;
-  --blend: 37;
+  --font-body: "Faculty Glyphic", Georgia, serif;
 }
 
 body {
-  font-family: var(--font-mono);
-  font-variation-settings: "BLND" var(--blend);
+  font-family: var(--font-body);
 }
 
 /* Mid-grey ground in light mode — between the white card and the dark
