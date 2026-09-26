@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
 import { ThemeToggle } from "../ThemeToggle";
+import { Sponge } from "../Sponge";
 
 function Specificity() {
   return (
@@ -24,6 +25,7 @@ function Specificity() {
             (both natural and artificial).
           </p>
         </article>
+        <Sponge />
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
       <ThemeToggle />

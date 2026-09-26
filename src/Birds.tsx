@@ -209,6 +209,20 @@ export function Birds() {
       const tx = AX * w + lx * 4.5;
       const ty = AY * h - (lz - 25) * 3.0;
 
+      // Specificity's gasket hangs in this sky; the flock flies around it,
+      // not through it.
+      let hole: { x: number; y: number; r: number } | null = null;
+      const sponge = document.querySelector(".sponge-sky");
+      if (sponge) {
+        const s = sponge.getBoundingClientRect();
+        const o = root.getBoundingClientRect();
+        hole = {
+          x: s.left - o.left + s.width / 2,
+          y: s.top - o.top + s.height / 2,
+          r: s.width * 0.46 + 22,
+        };
+      }
+
       for (let i = 0; i < birds.length; i++) {
         const b = birds[i];
         // Wander the personal offset (mean-reverting random walk, ~±100px).
@@ -252,6 +266,18 @@ export function Birds() {
         ax += (Math.random() - 0.5) * 90;
         ay += (Math.random() - 0.5) * 90;
 
+        if (hole) {
+          const ex = b.x - hole.x;
+          const ey = b.y - hole.y;
+          const d = Math.hypot(ex, ey) || 1;
+          const reach = hole.r + 60;
+          if (d < reach) {
+            const push = ((reach - d) / 60) ** 2 * 420;
+            ax += (ex / d) * push;
+            ay += (ey / d) * push;
+          }
+        }
+
         b.vx += ax * dt;
         b.vy += ay * dt;
         const sp = Math.hypot(b.vx, b.vy) || 1;
@@ -260,6 +286,24 @@ export function Birds() {
         b.vy = (b.vy / sp) * cl;
         b.x += b.vx * dt;
         b.y += b.vy * dt;
+
+        // A hard edge too, so a strong gust can't carry a bird inside.
+        if (hole) {
+          const ex = b.x - hole.x;
+          const ey = b.y - hole.y;
+          const d = Math.hypot(ex, ey) || 1;
+          if (d < hole.r) {
+            const nx = ex / d;
+            const ny = ey / d;
+            b.x = hole.x + nx * hole.r;
+            b.y = hole.y + ny * hole.r;
+            const vn = b.vx * nx + b.vy * ny;
+            if (vn < 0) {
+              b.vx -= vn * nx;
+              b.vy -= vn * ny;
+            }
+          }
+        }
       }
       place();
       raf = requestAnimationFrame(tick);

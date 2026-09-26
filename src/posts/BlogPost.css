@@ -52,3 +52,42 @@
     margin-right: 0;
   }
 }
+
+
+/* Specificity: the gasket hangs in the scene's sky on desktop, under the
+   flock, and sits below the list when the scene is hidden. */
+.sponge {
+  width: min(320px, 100%);
+  aspect-ratio: 1;
+  margin-top: 3rem;
+  align-self: center;
+  cursor: pointer;
+}
+
+.sponge-sky {
+  position: absolute;
+  z-index: -1;
+  top: 14%;
+  right: 12%;
+  width: clamp(220px, 24vw, 340px);
+  margin: 0;
+  pointer-events: auto;
+}
+
+.sponge:focus-visible {
+  outline: 1px dashed var(--color-line);
+  outline-offset: 6px;
+  border-radius: 50%;
+}
+
+.sponge canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--color-line);
+}
+
+/* Dark mode draws in the text cream, like the landscape. */
+[data-theme="dark"] .sponge canvas {
+  color: var(--color-text);
+}
