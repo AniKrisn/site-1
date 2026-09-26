@@ -76,6 +76,21 @@
   cursor: pointer;
 }
 
+/* A piece pinned into the landscape (Descriptions' eggs): behind the
+   drawing, so its lines stay in front, and dimmed with the tree. */
+.tree-piece {
+  position: absolute;
+  z-index: -1;
+  width: 200px;
+  aspect-ratio: 1;
+  pointer-events: none;
+}
+
+.tree-hidden .tree-piece {
+  opacity: 0.3;
+}
+
+.tree-piece:focus-visible,
 .sky-piece:focus-visible,
 .sky-piece-inline:focus-visible {
   outline: 1px dashed var(--color-line);
@@ -83,6 +98,7 @@
 }
 
 .sky-piece canvas,
+.tree-piece canvas,
 .sky-piece-inline canvas {
   display: block;
   width: 100%;
@@ -92,6 +108,7 @@
 
 /* Dark mode draws in the text cream, like the landscape. */
 [data-theme="dark"] .sky-piece canvas,
+[data-theme="dark"] .tree-piece canvas,
 [data-theme="dark"] .sky-piece-inline canvas {
   color: var(--color-text);
 }

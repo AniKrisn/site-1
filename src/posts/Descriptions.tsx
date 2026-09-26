@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
 import { ThemeToggle } from "../ThemeToggle";
+import { Egg } from "../Egg";
 
 function Descriptions() {
   return (
     <main className="container">
       <div className="content post-content">
-        <article className="post-text">
+        <article className="post-text" data-birds-avoid>
           <h1>Descriptions</h1>
           <p>1. Code is data, data is code, both are empty.</p>
           <p>
@@ -23,6 +24,7 @@ function Descriptions() {
           </p>
           <p>5. Teaching doesn't exist but learning does.</p>
         </article>
+        <Egg />
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
       <ThemeToggle />
