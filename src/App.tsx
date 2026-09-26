@@ -57,6 +57,12 @@ const projects: ProjectItem[] = [
     slug: "/cache/",
     mobileHref: "/cache/",
   },
+  {
+    title: "Cenote",
+    // outbound: it has its own Worker and multiplayer rooms, see the own-deployment note in CLAUDE.md
+    slug: "https://cenote.anikrishnantango.workers.dev/",
+    // no mobileHref: it needs a keyboard and pointer lock, otherwise a phone gets a pause screen it can't leave
+  },
 ];
 
 function App() {
