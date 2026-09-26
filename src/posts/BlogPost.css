@@ -54,9 +54,10 @@
 }
 
 
-/* Specificity: the gasket hangs in the scene's sky on desktop, under the
-   flock, and sits below the list when the scene is hidden. */
-.sponge {
+/* Drawn sky pieces (Specificity's gasket, Primitives' shrub): they hang in
+   the scene's sky on desktop, under the flock, and sit below the list when
+   the scene is hidden. */
+.sky-piece-inline {
   width: min(320px, 100%);
   aspect-ratio: 1;
   margin-top: 3rem;
@@ -64,23 +65,25 @@
   cursor: pointer;
 }
 
-.sponge-sky {
+.sky-piece {
   position: absolute;
   z-index: -1;
   top: 14%;
   right: 12%;
   width: clamp(220px, 24vw, 340px);
-  margin: 0;
+  aspect-ratio: 1;
   pointer-events: auto;
+  cursor: pointer;
 }
 
-.sponge:focus-visible {
+.sky-piece:focus-visible,
+.sky-piece-inline:focus-visible {
   outline: 1px dashed var(--color-line);
   outline-offset: 6px;
-  border-radius: 50%;
 }
 
-.sponge canvas {
+.sky-piece canvas,
+.sky-piece-inline canvas {
   display: block;
   width: 100%;
   height: 100%;
@@ -88,6 +91,7 @@
 }
 
 /* Dark mode draws in the text cream, like the landscape. */
-[data-theme="dark"] .sponge canvas {
+[data-theme="dark"] .sky-piece canvas,
+[data-theme="dark"] .sky-piece-inline canvas {
   color: var(--color-text);
 }

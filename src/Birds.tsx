@@ -209,12 +209,12 @@ export function Birds() {
       const tx = AX * w + lx * 4.5;
       const ty = AY * h - (lz - 25) * 3.0;
 
-      // Specificity's gasket hangs in this sky; the flock flies around it,
-      // not through it.
+      // A drawn sky piece (gasket, shrub) hangs here; the flock flies around
+      // it, not through it.
       let hole: { x: number; y: number; r: number } | null = null;
-      const sponge = document.querySelector(".sponge-sky");
-      if (sponge) {
-        const s = sponge.getBoundingClientRect();
+      const piece = document.querySelector(".sky-piece");
+      if (piece) {
+        const s = piece.getBoundingClientRect();
         const o = root.getBoundingClientRect();
         hole = {
           x: s.left - o.left + s.width / 2,

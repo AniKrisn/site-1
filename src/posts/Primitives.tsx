@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import "./BlogPost.css";
 import { ThemeToggle } from "../ThemeToggle";
+import { Shrub } from "../Shrub";
 
 function Primitives() {
   return (
@@ -22,6 +23,7 @@ function Primitives() {
             unnecessary complexity.
           </p>
         </article>
+        <Shrub />
         <Link to="/" className="dot-post" aria-label="Home" />
       </div>
       <ThemeToggle />
