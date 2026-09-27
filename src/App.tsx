@@ -63,6 +63,12 @@ const projects: ProjectItem[] = [
     slug: "https://cenote.anikrishnantango.workers.dev/",
     // no mobileHref: it needs a keyboard and pointer lock, otherwise a phone gets a pause screen it can't leave
   },
+  {
+    title: "(Educative) contraptions",
+    // outbound: its own Worker, see the own-deployment note in CLAUDE.md
+    slug: "https://rb-machine.anikrishnantango.workers.dev/",
+    mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
+  },
 ];
 
 function App() {
