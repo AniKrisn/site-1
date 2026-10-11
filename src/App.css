@@ -1,14 +1,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap");
 
-/* Text anchors to the card's top-left corner: an equal 96px (12u) inset from
-   the card's inner edge on both axes, strong left axis, air to the right. */
+/* Text anchors to the card's top-left corner: a 96px (12u) inset from the
+   card's inner edge on the left, a tighter 56px on top, air to the right. */
 .container {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
   min-height: 100%;
-  padding: 136px 2rem 2rem 136px;
+  padding: 96px 2rem 2rem 136px;
 }
 
 /* Mobile keeps the original centred layout; the corner anchor is desktop-only. */
@@ -132,7 +132,7 @@
 .sections {
   display: flex;
   flex-direction: column;
-  gap: 2.5rem;
+  gap: 1.75rem;
 }
 
 .posts,
