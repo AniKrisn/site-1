@@ -69,6 +69,11 @@ const projects: ProjectItem[] = [
     slug: "https://rb-machine.anikrishnantango.workers.dev/",
     mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
   },
+  {
+    title: "Overgrowth",
+    slug: "/overgrowth/",
+    // no mobileHref: cutting is a precise drag at high zoom, otherwise a phone just pans
+  },
 ];
 
 function App() {
