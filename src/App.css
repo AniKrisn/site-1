@@ -135,6 +135,19 @@
   gap: 2.5rem;
 }
 
+/* Games sit beside projects, otherwise the lists run into the ground line on short windows. */
+.section-row {
+  display: flex;
+  gap: 4rem;
+}
+
+@media (max-width: 768px) {
+  .section-row {
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+}
+
 .posts,
 .projects-list {
   display: flex;

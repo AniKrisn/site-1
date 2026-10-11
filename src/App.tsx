@@ -36,16 +36,6 @@ const projects: ProjectItem[] = [
     mobileHref: "/ligne-claire/",
   },
   {
-    title: "The Ferryman",
-    // outbound rather than dropped into public/: it has an agent in it and
-    // an API key behind a Worker, so it wants its own origin -- see the
-    // "when a project should get its own deployment" note in CLAUDE.md
-    slug: "https://ferryman.anikrisn.com/",
-    // on a phone it shows a die to throw and says to come back on a
-    // larger screen, so the entry should still be there
-    mobileHref: "https://ferryman.anikrisn.com/",
-  },
-  {
     title: "Marks (wip)",
     slug: "/marks/",
     // needs a wide screen, but it loads anywhere and the repo is private,
@@ -58,16 +48,29 @@ const projects: ProjectItem[] = [
     mobileHref: "/cache/",
   },
   {
-    title: "Cenote",
-    // outbound: it has its own Worker and multiplayer rooms, see the own-deployment note in CLAUDE.md
-    slug: "https://cenote.anikrishnantango.workers.dev/",
-    // no mobileHref: it needs a keyboard and pointer lock, otherwise a phone gets a pause screen it can't leave
-  },
-  {
     title: "(Educative) contraptions",
     // outbound: its own Worker, see the own-deployment note in CLAUDE.md
     slug: "https://rb-machine.anikrishnantango.workers.dev/",
     mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
+  },
+];
+
+const games: ProjectItem[] = [
+  {
+    title: "The Ferryman",
+    // outbound rather than dropped into public/: it has an agent in it and
+    // an API key behind a Worker, so it wants its own origin -- see the
+    // "when a project should get its own deployment" note in CLAUDE.md
+    slug: "https://ferryman.anikrisn.com/",
+    // on a phone it shows a die to throw and says to come back on a
+    // larger screen, so the entry should still be there
+    mobileHref: "https://ferryman.anikrisn.com/",
+  },
+  {
+    title: "Cenote",
+    // outbound: it has its own Worker and multiplayer rooms, see the own-deployment note in CLAUDE.md
+    slug: "https://cenote.anikrishnantango.workers.dev/",
+    // no mobileHref: it needs a keyboard and pointer lock, otherwise a phone gets a pause screen it can't leave
   },
   {
     title: "Overgrowth",
@@ -75,6 +78,30 @@ const projects: ProjectItem[] = [
     // no mobileHref: cutting is a precise drag at high zoom, otherwise a phone just pans
   },
 ];
+
+function ProjectList({ items }: { items: ProjectItem[] }) {
+  return (
+    <nav className="projects-list">
+      {items.map((project) => (
+        <span key={project.slug} className="project-link-wrap">
+          <a href={project.slug} className="post-link post-link-desktop">
+            {project.title}
+          </a>
+          {project.mobileHref && (
+            <a
+              href={project.mobileHref}
+              className="post-link post-link-mobile"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {project.title}
+            </a>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
 
 function App() {
   return (
@@ -91,28 +118,16 @@ function App() {
               ))}
             </nav>
           </section>
-          <section className="projects">
-            <h2 className="section-title">Projects</h2>
-            <nav className="projects-list">
-              {projects.map((project) => (
-                <span key={project.slug} className="project-link-wrap">
-                  <a href={project.slug} className="post-link post-link-desktop">
-                    {project.title}
-                  </a>
-                  {project.mobileHref && (
-                    <a
-                      href={project.mobileHref}
-                      className="post-link post-link-mobile"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {project.title}
-                    </a>
-                  )}
-                </span>
-              ))}
-            </nav>
-          </section>
+          <div className="section-row">
+            <section className="projects">
+              <h2 className="section-title">Projects</h2>
+              <ProjectList items={projects} />
+            </section>
+            <section className="projects">
+              <h2 className="section-title">Games</h2>
+              <ProjectList items={games} />
+            </section>
+          </div>
         </div>
         <Link to="/about" className="dot" aria-label="About" />
       </div>
