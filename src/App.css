@@ -135,19 +135,6 @@
   gap: 2.5rem;
 }
 
-/* Games sit beside projects, otherwise the lists run into the ground line on short windows. */
-.section-row {
-  display: flex;
-  gap: 4rem;
-}
-
-@media (max-width: 768px) {
-  .section-row {
-    flex-direction: column;
-    gap: 2.5rem;
-  }
-}
-
 .posts,
 .projects-list {
   display: flex;
@@ -178,6 +165,26 @@
 
 .post-link:hover {
   opacity: 0.5;
+}
+
+.hover-thumb {
+  position: fixed;
+  z-index: 30;
+  max-width: 256px;
+  /* the rest are 16:10 and stop at 160px; this keeps square ones (Overgrowth) from looming */
+  max-height: 200px;
+  pointer-events: none;
+  border: 1px solid var(--color-line);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+
+.hover-thumb.on {
+  opacity: 1;
+  transform: none;
+  transition-duration: 120ms;
 }
 
 .dot {
