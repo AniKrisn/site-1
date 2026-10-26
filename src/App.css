@@ -57,6 +57,36 @@
   pointer-events: none;
 }
 
+/* The flow field from the gen.tldraw board (Flow.tsx), as a faint glow in
+   the sky off to the right; any stronger and it fights the line drawing. */
+.flow {
+  position: absolute;
+  inset: 0;
+  background: url("/flow.webp") center / cover;
+  opacity: 0.15;
+  mask-image: radial-gradient(ellipse 55% 70% at 85% 20%, #000, transparent);
+}
+
+.flow canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+/* once the live field paints, it covers the static painting with paper */
+.flow:has(canvas.on) {
+  background: var(--color-card);
+}
+
+.flow canvas.on {
+  opacity: 1;
+}
+
+[data-theme="dark"] .flow {
+  opacity: 0.08;
+}
+
 .frame-card > :where(:not(.scene)) {
   position: relative;
   z-index: 1;

@@ -5,6 +5,7 @@ import { drawRectD } from "./sketch";
 import { Landscape } from "./Landscape";
 import { Birds } from "./Birds";
 import { Stars } from "./Stars";
+import { Flow } from "./Flow";
 
 const STROKE_WIDTH = 4;
 const ROUNDNESS = 24;
@@ -131,6 +132,7 @@ export function Frame() {
       <SketchBorder seed="stage" className="sketch-stage" clipId="stage-clip" />
       <div className="frame-card" ref={cardRef}>
         <div className="scene" aria-hidden="true">
+          <Flow />
           <Landscape />
           <Birds />
           <Stars />
