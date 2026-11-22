@@ -58,7 +58,8 @@ Check it before it goes out with `npx vite preview --port 4173` from
 It lives at `~/Documents/games/diorama` (the Scenes app, an Electron app
 for making looping scenes with an agent). `/scene/` is a read-only build
 of it: every scene plays and its params and timeline work, but nothing
-can be made, removed or asked for. To ship a change:
+can be made, removed or asked for. Below 768px it shows one scene and
+"Return on a larger screen" instead of the canvas. To ship a change:
 
 ```bash
 cd ~/Documents/games/diorama

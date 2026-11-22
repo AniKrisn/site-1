@@ -6,6 +6,7 @@ import { Landscape } from "./Landscape";
 import { Birds } from "./Birds";
 import { Stars } from "./Stars";
 import { Flow } from "./Flow";
+import { useWide } from "./wide";
 
 const STROKE_WIDTH = 4;
 const ROUNDNESS = 24;
@@ -62,12 +63,14 @@ export function Frame() {
   const cardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
+  const wide = useWide();
 
   /* After each navigation, split the page's text into word spans that slide
      aside when a bird or the tree crown overlaps them. */
   useEffect(() => {
     const card = cardRef.current;
-    if (!card) return;
+    // phones have no scene to make way for
+    if (!card || !wide) return;
     let id = 0;
     const target = () =>
       card.querySelector<HTMLElement>("article, .sections");
@@ -117,26 +120,30 @@ export function Frame() {
       frameRef.current?.classList.remove("tree-hidden");
       detachDodgeText();
     };
-  }, [location.pathname]);
+  }, [location.pathname, wide]);
 
   return (
     <div className="frame" ref={frameRef}>
       <div className="stage" aria-hidden="true">
-        <iframe
-          className="beetle-bg"
-          src="/beetle/index.html?embed"
-          title="Beetle"
-          tabIndex={-1}
-        />
+        {wide && (
+          <iframe
+            className="beetle-bg"
+            src="/beetle/index.html?embed"
+            title="Beetle"
+            tabIndex={-1}
+          />
+        )}
       </div>
       <SketchBorder seed="stage" className="sketch-stage" clipId="stage-clip" />
       <div className="frame-card" ref={cardRef}>
-        <div className="scene" aria-hidden="true">
-          <Flow />
-          <Landscape />
-          <Birds />
-          <Stars />
-        </div>
+        {wide && (
+          <div className="scene" aria-hidden="true">
+            <Flow />
+            <Landscape />
+            <Birds />
+            <Stars />
+          </div>
+        )}
         <Outlet />
       </div>
       <SketchBorder seed="card" className="sketch-card" clipId="card-clip" />

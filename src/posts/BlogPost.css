@@ -55,16 +55,7 @@
 
 
 /* Drawn sky pieces (Specificity's gasket, Primitives' shrub): they hang in
-   the scene's sky on desktop, under the flock, and sit below the list when
-   the scene is hidden. */
-.sky-piece-inline {
-  width: min(320px, 100%);
-  aspect-ratio: 1;
-  margin-top: 3rem;
-  align-self: center;
-  cursor: pointer;
-}
-
+   the scene's sky, under the flock. */
 .sky-piece {
   position: absolute;
   z-index: -1;
@@ -91,15 +82,13 @@
 }
 
 .tree-piece:focus-visible,
-.sky-piece:focus-visible,
-.sky-piece-inline:focus-visible {
+.sky-piece:focus-visible {
   outline: 1px dashed var(--color-line);
   outline-offset: 6px;
 }
 
 .sky-piece canvas,
-.tree-piece canvas,
-.sky-piece-inline canvas {
+.tree-piece canvas {
   display: block;
   width: 100%;
   height: 100%;
@@ -108,7 +97,6 @@
 
 /* Dark mode draws in the text cream, like the landscape. */
 [data-theme="dark"] .sky-piece canvas,
-[data-theme="dark"] .tree-piece canvas,
-[data-theme="dark"] .sky-piece-inline canvas {
+[data-theme="dark"] .tree-piece canvas {
   color: var(--color-text);
 }

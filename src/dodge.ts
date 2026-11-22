@@ -165,7 +165,6 @@ function tick() {
 
 export function attachDodgeText(root: HTMLElement, scrollEl: HTMLElement) {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  if (window.innerWidth < 1024) return;
   detachDodgeText();
   wrapWords(root);
   measured = root;

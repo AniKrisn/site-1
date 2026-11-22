@@ -478,19 +478,6 @@
   }
 }
 
-@media (max-width: 1023px) {
-  .birds,
-  .stars {
-    display: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .landscape {
-    display: none;
-  }
-}
-
 .project-link-wrap {
   display: contents;
 }

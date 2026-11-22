@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { makeLead } from "./pencil";
+import { useWide } from "./wide";
 
 /* A square canvas drawn into the scene: on desktop it hangs in the sky,
-   under the flock (which steers around .sky-piece); below 1024px the scene
-   is hidden, so it sits under the post text instead. Owns sizing, theme and
+   under the flock (which steers around .sky-piece); phones have no scene,
+   so it is left out there. Owns sizing, theme and
    the pencil lead; the piece supplies the drawing loop. */
 
 export type SkyView = {
@@ -19,8 +20,6 @@ export type SkyStart = (
   box: HTMLDivElement,
   view: () => SkyView,
 ) => () => void;
-
-const WIDE = "(min-width: 1024px)";
 
 /* Pin a point of the canvas (fractions of its width) to a point of the
    landscape drawing (its viewBox units), instead of hanging in the sky. */
@@ -37,16 +36,12 @@ export function SkyPiece({
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
+  const wide = useWide();
   const [scene, setScene] = useState<Element | null>(null);
 
   useEffect(() => {
     setScene(document.querySelector(".scene"));
-    const mq = window.matchMedia(WIDE);
-    const onChange = () => setWide(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
+  }, [wide]);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -100,7 +95,7 @@ export function SkyPiece({
   const box = (
     <div
       ref={boxRef}
-      className={wide ? (anchor ? "tree-piece" : "sky-piece") : "sky-piece-inline"}
+      className={anchor ? "tree-piece" : "sky-piece"}
       role="button"
       tabIndex={0}
       aria-label={label}
@@ -108,6 +103,5 @@ export function SkyPiece({
       <canvas ref={canvasRef} />
     </div>
   );
-  if (!wide) return box;
-  return scene ? createPortal(box, scene) : null;
+  return wide && scene ? createPortal(box, scene) : null;
 }
