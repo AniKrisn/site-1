@@ -41,7 +41,7 @@ const projects: ProjectItem[] = [
     mobileHref: "/ligne-claire/",
   },
   {
-    title: "Marks (wip)",
+    title: "Marks",
     thumb: "/thumbs/marks.jpg",
     slug: "/marks/",
     // needs a wide screen, but it loads anywhere and the repo is private,
@@ -55,19 +55,19 @@ const projects: ProjectItem[] = [
     mobileHref: "/cache/",
   },
   {
+    title: "Contraptions",
+    thumb: "/thumbs/contraptions.jpg",
+    // outbound: its own Worker, see the own-deployment note in CLAUDE.md
+    slug: "https://rb-machine.anikrishnantango.workers.dev/",
+    mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
+  },
+  {
     title: "Scene",
     thumb: "/thumbs/scene.jpg",
     slug: "/scene/",
     // read-only and wants a wide screen, but it loads anywhere, so the
     // phone gets the same page rather than a missing entry
     mobileHref: "/scene/",
-  },
-  {
-    title: "(Educative) contraptions",
-    thumb: "/thumbs/contraptions.jpg",
-    // outbound: its own Worker, see the own-deployment note in CLAUDE.md
-    slug: "https://rb-machine.anikrishnantango.workers.dev/",
-    mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
   },
 ];
 
