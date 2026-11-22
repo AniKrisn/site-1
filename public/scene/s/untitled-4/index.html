@@ -1,0 +1,287 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794608160829;window.__values={"wave":0.3,"colour":"#d8261c","trim":"#f2b432"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Grand Dragon</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A five second loop. A red Chinese dragon with golden horns, mane, spines and belly floats over a white page, a slow wave rolling down its long body from head to tail while its whiskers drift and its little legs paddle."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const N = 16;
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uTone, uTrim;
+uniform vec4 uSeg[${N}];          // the spine of the body: centre, and how thick
+uniform vec3 uHead, uHF, uHU, uHS; // where the head is, and which way it faces
+uniform vec4 uLeg;                 // how far each leg has swung
+uniform float uSpan, uWhisk;
+const int N = ${N};
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const vec3 EYE = vec3(0.075, 0.055, 0.072);
+const float HEAD = 1.45;  // how much larger the head is than it was modelled
+
+float gMat; // 0 scales, 1 gold, 2 eye
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// A pair of legs hanging under the body, swinging as they paddle, with golden talons
+void limbs(vec3 p, vec4 c, float swing, inout float body, inout float gold) {
+  for (int j = 0; j < 2; j++) {
+    float side = j == 0 ? 1.0 : -1.0, s = side * swing;
+    vec3 hip = c.xyz + vec3(0.0, -0.3 * c.w, side * 0.6 * c.w);
+    vec3 knee = hip + vec3(0.03 + s, -0.13, side * 0.07), foot = knee + vec3(0.08, -0.02 + s * 0.3, side * 0.01);
+    body = smin(body, min(rod(p, hip, knee, 0.05, 0.035), rod(p, knee, foot, 0.035, 0.03)), 0.03);
+    for (int i = 0; i < 3; i++) gold = min(gold, rod(p, foot, foot + vec3(0.045, -0.03, side * 0.01 + float(i - 1) * 0.025), 0.012, 0.003));
+  }
+}
+
+// A rod pressed flat side to side, for the crest and the mane
+float vane(vec3 p, vec3 a, vec3 b, float ra, float rb) { vec3 k = vec3(1.0, 1.0, 2.5); return rod(p * k, a * k, b * k, ra, rb) / 2.5; }
+
+float map(vec3 p) {
+  // The long body, and its legs
+  float body = 1e3, gold = 1e3;
+  for (int i = 0; i < N - 1; i++) body = min(body, rod(p, uSeg[i].xyz, uSeg[i + 1].xyz, uSeg[i].w, uSeg[i + 1].w));
+  limbs(p, uSeg[3], uLeg.x, body, gold);
+  limbs(p, uSeg[10], uLeg.z, body, gold);
+
+  // A golden crest down the back, tall behind the head and dwindling to the tail
+  for (int i = 1; i < N - 2; i++) {
+    vec4 c = uSeg[i]; float s = c.w / 0.1 * (1.3 - 0.5 * float(i) / float(N));
+    vec3 b = c.xyz + vec3(0.0, c.w * 0.75, 0.0);
+    gold = min(gold, vane(p, b, b + vec3(-0.09, 0.12, 0.0) * s, 0.045 * s, 0.006));
+  }
+  // The flame at the end of the tail
+  vec3 tail = uSeg[N - 1].xyz, dir = normalize(tail - uSeg[N - 2].xyz);
+  gold = min(gold, rod(p, tail, tail + dir * 0.22 + vec3(0.0, 0.1, 0.0), 0.06, 0.008));
+  gold = min(gold, rod(p, tail, tail + dir * 0.2 - vec3(0.0, 0.08, 0.0), 0.05, 0.008));
+  gold = min(gold, rod(p, tail, tail + dir * 0.25 + vec3(0.0, 0.01, 0.0), 0.055, 0.008));
+
+  // The head, in its own space: x forward, y up, z to the side, folded so one side does for both
+  vec3 d = p - uHead, hq = vec3(dot(d, uHF), dot(d, uHU), dot(d, uHS)) / HEAD, q = vec3(hq.xy, abs(hq.z));
+  float bodyOnly = body; body = 1e3;
+  float finsOnly = gold; gold = 1e3;
+  float h = egg(q, vec3(0.0, 0.03, 0.0), vec3(0.12, 0.1, 0.1));                       // skull
+  h = smin(h, egg(q, vec3(0.15, 0.005, 0.0), vec3(0.13, 0.06, 0.075)), 0.04);          // snout
+  h = smin(h, ball(q, vec3(0.255, 0.035, 0.04), 0.035), 0.02);                          // nostrils
+  h = smin(h, ball(q, vec3(0.07, 0.08, 0.05), 0.04), 0.03);                             // brows
+  h = smin(h, egg(q, vec3(0.11, -0.075, 0.0), vec3(0.12, 0.03, 0.06)), 0.015);          // jaw
+  body = smin(bodyOnly, h * HEAD, 0.05);
+  // Antlers, branching back off the brow
+  gold = min(gold, rod(q, vec3(0.02, 0.09, 0.05), vec3(-0.14, 0.22, 0.1), 0.032, 0.02));
+  gold = min(gold, rod(q, vec3(-0.14, 0.22, 0.1), vec3(-0.3, 0.27, 0.12), 0.02, 0.006));
+  gold = min(gold, rod(q, vec3(-0.07, 0.155, 0.075), vec3(-0.05, 0.29, 0.1), 0.017, 0.005));
+  gold = min(gold, rod(q, vec3(-0.19, 0.235, 0.105), vec3(-0.2, 0.34, 0.12), 0.014, 0.004));
+  // A full mane streaming back, lifting in the wind
+  for (int i = 0; i < 4; i++) {
+    float k = float(i);
+    vec3 a = vec3(-0.04 - 0.03 * k, 0.09 - 0.05 * k, 0.03 + 0.02 * k);
+    gold = min(gold, vane(q, a, a + vec3(-0.28 + 0.03 * k, 0.06 - 0.03 * k + (0.02 + 0.01 * k) * uWhisk, 0.06 + 0.03 * k), 0.05, 0.008));
+  }
+  // Long whiskers off the snout, trailing back and drifting, and a beard under the chin
+  vec3 w0 = vec3(0.25, 0.0, 0.05), w1 = vec3(0.29, -0.03, 0.17), w2 = vec3(0.18 + 0.03 * uWhisk, -0.1, 0.3), w3 = vec3(-0.02, -0.17 + 0.05 * uWhisk, 0.36), w4 = vec3(-0.2, -0.12 + 0.08 * uWhisk, 0.38);
+  gold = min(gold, min(min(rod(q, w0, w1, 0.02, 0.017), rod(q, w1, w2, 0.017, 0.015)), min(rod(q, w2, w3, 0.015, 0.012), rod(q, w3, w4, 0.012, 0.005))));
+  gold = min(gold, vane(q, vec3(0.1, -0.09, 0.02), vec3(0.0, -0.2 + 0.02 * uWhisk, 0.03), 0.04, 0.008));
+  gold = min(finsOnly, gold * HEAD);
+  float eye = ball(q, EYE, 0.03) * HEAD;
+
+  float m = min(body, min(gold, eye));
+  gMat = m == body ? 0.0 : m == gold ? 1.0 : 2.0;
+  return m;
+}
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.008, -0.008);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 2.6) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0, t = 0.0;
+  for (int i = 0; i < 96 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.002) { tHit = t; break; }
+    t += d;
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    map(p);
+    float mat = gMat;
+    float glow = clamp(dot(n, uLight) * 0.6 + 0.4, 0.0, 1.0);
+    vec3 base = uTone;
+    if (mat > 1.5) {
+      // Gold eye, black pupil looking ahead
+      vec3 d = p - uHead, hq = vec3(dot(d, uHF), dot(d, uHU), abs(dot(d, uHS))) / HEAD;
+      base = dot(normalize(hq - EYE), normalize(vec3(0.6, 0.1, 0.8))) > 0.8 ? vec3(0.08) : uTrim;
+      glow = 0.5 + 0.5 * glow;
+    } else if (mat > 0.5) base = uTrim;
+    else {
+      // The belly is golden plates, the back red scales
+      float best = 1e3, arc = 0.0; vec3 mid = p; float r = 0.1;
+      for (int i = 0; i < N - 1; i++) {
+        vec3 a = uSeg[i].xyz, b = uSeg[i + 1].xyz, pa = p - a, ba = b - a;
+        float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0), dd = length(pa - ba * h);
+        if (dd < best) { best = dd; arc = float(i) + h; mid = a + ba * h; r = mix(uSeg[i].w, uSeg[i + 1].w, h); }
+      }
+      bool head = length(p - uHead) < 0.35;
+      if (!head && (p.y - mid.y) < -0.4 * r) base = uTrim * (fract(arc * 2.0) < 0.2 ? 0.75 : 1.0);
+      // Rows of scales on the back, each edged a shade darker
+      else if (!head) {
+        vec2 g = vec2(arc * 2.5, atan(p.z - mid.z, p.y - mid.y) * 1.6);
+        g.x += 0.5 * mod(floor(g.y), 2.0);
+        if (length(fract(g) - vec2(0.5, 0.0)) > 0.62) base *= 0.78;
+      }
+    }
+    col = base * (0.3 + 0.7 * stepped(glow, 4.0));
+  } else if (tFloor > 0.0) {
+    // The page, and the shadow on it
+    float dim = 1.0 - lightAt(ro + rd * tFloor + vec3(0.0, 0.02, 0.0));
+    col = vec3(1.0 - 0.24 * stepped(dim, 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.1 }, uTone: { value: new THREE.Color() }, uTrim: { value: new THREE.Color() },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0.15, 0.45, 0) }, uLight: { value: V() },
+  uSeg: { value: Array.from({ length: N }, () => new THREE.Vector4()) },
+  uHead: { value: V() }, uHF: { value: V() }, uHU: { value: V() }, uHS: { value: V() },
+  uLeg: { value: new THREE.Vector4() }, uWhisk: { value: 0 },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  // Narrow windows are fitted by width, so head and tail stay in
+  uniforms.uSpan.value = Math.max(0.95, 1.6 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.3 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 5;
+const P = params({
+  wave: [0.17, 0, 0.3],     // how deep the ripple down the body is
+  colour: '#d8261c',         // the scales
+  trim: '#f2b432',           // antlers, mane, crest, claws and belly
+});
+
+const up = V(0, 1, 0), tmp = V();
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.25 + 0.12 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // One wave a loop rolls from head to tail; the head rides it more gently
+  const S = U.uSeg.value;
+  for (let i = 0; i < N; i++) {
+    const ph = round - i * 0.55, a = P.wave * (0.45 + 0.55 * Math.min(1, i / 4));
+    const r = i < 3 ? 0.095 + i * 0.009 : 0.115 * (1 - (i - 3) / (N - 1 - 3)) + 0.03 * ((i - 3) / (N - 1 - 3));
+    S[i].set(0.95 - i * 0.145, 0.7 +a * Math.sin(ph), a * 0.6 * Math.cos(ph), r);
+  }
+  // The head sits at the front of the body, facing along it
+  const hf = U.uHF.value.set(S[0].x - S[1].x, S[0].y - S[1].y, S[0].z - S[1].z).normalize();
+  const hu = U.uHU.value.copy(up).addScaledVector(hf, -hf.dot(up)).normalize();
+  U.uHS.value.crossVectors(hf, hu);
+  U.uHead.value.set(S[0].x, S[0].y, S[0].z).addScaledVector(hf, 0.04);
+
+  // The legs paddle with the wave, front and back out of step; the whiskers trail behind
+  const legAt = i => 0.05 * Math.sin(round - i * 0.55 + 1.2);
+  U.uLeg.value.set(legAt(3), -legAt(3), legAt(10), -legAt(10));
+  U.uWhisk.value = Math.sin(round - 1.0);
+
+  U.uTone.value.set(P.colour);
+  U.uTrim.value.set(P.trim);
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

@@ -1,0 +1,285 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795273467771;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Ruin</title>
+<style>
+  /* Layout: one picture filling the pane, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A twelve second loop. A tall overgrown ruin of ochre stone, a broken tower joined by an arch to a pier, stands in a sunlit meadow under a blue sky with drifting wisps of cloud."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uStone;
+uniform vec2 uBack;     // which way on the ground is away from you
+uniform float uSpan, uGrowth, uRound;
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float box(vec3 p, vec3 c, vec3 h, float r) { vec3 q = abs(p - c) - h + r; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r; }
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+// Tones in clean bands: flat colour, with dots only in a narrow seam where one band meets the next
+float banded(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps, f = fract(x); return min(floor(x) + (smoothstep(0.32, 0.68, f) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+// The thing: a ruin. A broken tower, a pier, the arch between them, a fallen piece of vault in front, and what grows on it.
+const vec3 HEART = vec3(0.1, 1.0, 0.1);   // middle of the ruin, for the ball that bounds it
+const float BOUND = 2.15;
+const vec3 LEAF[4] = vec3[4](vec3(0.12, 0.2, 0.15), vec3(0.23, 0.35, 0.2), vec3(0.41, 0.52, 0.25), vec3(0.64, 0.7, 0.36));
+// Where the bushes sit, and how big each is
+const vec4 BUSH[13] = vec4[13](
+  vec4(0.42, 2.3, 0.0, 0.2), vec4(0.63, 2.22, 0.1, 0.12),                                // the top of the tower
+  vec4(0.24, 1.54, 0.12, 0.13), vec4(0.78, 1.55, 0.15, 0.15), vec4(0.5, 1.52, 0.27, 0.1), // its shoulder
+  vec4(-0.38, 1.62, -0.05, 0.12), vec4(-0.1, 1.59, 0.0, 0.08),                           // along the arch
+  vec4(-0.45, 0.84, -0.25, 0.13),                                                        // the wall behind
+  vec4(-1.0, 1.96, 0.0, 0.16),                                                           // the pier
+  vec4(-0.3, 0.68, 0.5, 0.12), vec4(0.45, 0.1, 0.5, 0.2),                                // the fallen vault, and beside it
+  vec4(1.0, 0.32, -0.1, 0.2), vec4(1.5, 0.12, 0.0, 0.18));                               // the low wall
+float rock(vec3 p) {
+  float lumps = noise(p * 2.6 + 3.0) - 0.5, grain = noise(p * vec3(6.0, 11.0, 6.0)) - 0.5;
+  // the tower: a broad base, a narrower neck, a bulging head broken off at a slant
+  float d = box(p, vec3(0.5, 0.75, 0.0), vec3(0.34, 0.75, 0.3), 0.04);
+  float head = smin(box(p, vec3(0.52, 1.85, -0.02), vec3(0.22, 0.45, 0.22), 0.05), ball(p, vec3(0.55, 2.02, 0.0), 0.33), 0.1);
+  d = smin(d, max(head, dot(p - vec3(0.5, 2.3, 0.0), vec3(0.33, 0.94, 0.09))), 0.06);
+  // the pier, leaning out towards the arch at its top
+  float pier = smin(box(p, vec3(-1.0, 1.1, -0.05), vec3(0.3, 1.1, 0.36), 0.05), ball(p, vec3(-0.84, 1.62, -0.05), 0.3), 0.12);
+  d = smin(d, max(pier, dot(p - vec3(-1.0, 1.9, 0.0), vec3(-0.25, 0.95, 0.18))), 0.06);
+  // the arch between them, and the low wall seen through it
+  float arch = max(box(p, vec3(-0.27, 1.3, -0.05), vec3(0.52, 0.28, 0.17), 0.03), 0.42 - length(p.xy - vec2(-0.27, 1.0)));
+  d = smin(d, arch, 0.05);
+  d = smin(d, box(p, vec3(-0.27, 0.4, -0.25), vec3(0.5, 0.4, 0.08), 0.03), 0.05);
+  // the fallen vault: a round-topped slab with a rim and a hollow face
+  vec2 v = (p.xy - vec2(-0.1, 0.25)) * vec2(1.0, 0.85);
+  float slab = max(max(length(v) - 0.42, abs(p.z - 0.5) - 0.2), -max(length(v) - 0.31, 0.62 - p.z));
+  d = smin(d, slab, 0.04);
+  // a low wall trailing away to the right, lower as it goes
+  d = smin(d, box(vec3(p.x, p.y + max(p.x - 0.8, 0.0) * 0.3, p.z), vec3(1.25, 0.2, -0.2), vec3(0.5, 0.2, 0.12), 0.04), 0.05);
+  // weathering: big lumps, grain, and courses of stone
+  d -= lumps * 0.08 + grain * 0.04 + 0.01 * sin(p.y * 21.0 + lumps * 8.0);
+  // two windows in the tower
+  d = max(d, -box(p, vec3(0.45, 1.05, 0.3), vec3(0.045, 0.08, 0.12), 0.0));
+  return max(d, -box(p, vec3(0.6, 1.72, 0.22), vec3(0.04, 0.06, 0.12), 0.0));
+}
+float leaves(vec3 p) {
+  float d = 1e3;
+  for (int i = 0; i < 13; i++) {
+    vec4 b = BUSH[i];
+    b.x += 0.03 * sin(uRound * 2.0 + b.y * 4.0 + b.x * 3.0);   // a little wind
+    d = min(d, length((p - b.xyz) * vec3(1.0, 1.25, 1.0)) - b.w * uGrowth);
+  }
+  return d - ((noise(p * 10.0) - 0.5) * 0.09 + (noise(p * 5.0) - 0.5) * 0.06) * min(uGrowth, 1.0);
+}
+float map(vec3 p) { return min(rock(p), leaves(p)); }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.016, -0.016);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the sun reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 40; i++) {
+    vec3 q = ro + uLight * t;
+    if (length(q - HEART) > BOUND + 0.3 && dot(q - HEART, uLight) > 0.0) break;
+    float d = map(q);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.25);
+    if (res < 0.01 || t > 4.5) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// The stone's few tones, all drawn out of the one colour
+vec3 stoneTone(float t) {
+  float x = clamp(t, 0.0, 1.0) * 4.0; int k = min(int(x) + (fract(x) > dots() ? 1 : 0), 4);
+  if (k == 0) return uStone * 0.38 + vec3(0.02, 0.0, 0.05);
+  if (k == 1) return uStone * 0.62;
+  if (k == 2) return uStone * 0.85;
+  if (k == 3) return mix(uStone, vec3(1.0, 0.9, 0.7), 0.35);
+  return mix(uStone, vec3(1.0, 0.95, 0.8), 0.7);
+}
+vec3 leafTone(float t) { float x = clamp(t, 0.0, 1.0) * 3.0; return LEAF[min(int(x) + (fract(x) > dots() ? 1 : 0), 3)]; }
+
+// Beyond: a sky pale at the horizon and blue above, with thin wisps of cloud drifting along it
+const vec3 SKY[3] = vec3[3](vec3(0.95, 0.93, 0.86), vec3(0.76, 0.84, 0.93), vec3(0.56, 0.69, 0.89));   // low on the picture to high
+vec3 skyAt(vec2 s) { return SKY[int(banded(s.y * 0.6 + 0.42, 2.0) * 2.0 + 0.5)]; }
+vec3 beyond(vec2 s) {
+  float wisp = sin(s.y * 10.0 + 1.8 * sin(s.x * 2.0 + 1.0)) * sin(s.x * 7.0 - uRound + 2.5 * sin(s.y * 3.0 + 0.7));
+  return smoothstep(0.45, 0.85, wisp) * smoothstep(0.0, 0.4, s.y) > dots() ? vec3(0.98, 0.96, 0.93) : skyAt(s);
+}
+
+// The land: a meadow, flat where the ruin stands and rolling a little all round it
+const vec3 GRASS[4] = vec3[4](vec3(0.3, 0.4, 0.2), vec3(0.47, 0.55, 0.24), vec3(0.68, 0.7, 0.3), vec3(0.86, 0.82, 0.42));
+const float REACH = 4.2;      // how far back the land goes before it has paled into the sky
+const float TALLEST = 0.5;    // nothing on the land stands higher than this
+float land(vec2 q) {
+  float out_ = smoothstep(1.9, 3.4, length(q));
+  float rows = (0.5 + 0.5 * sin(q.x * 1.3 + 1.2 * sin(q.y * 0.9))) * (0.5 + 0.5 * sin(q.y * 1.1 + sin(q.x * 0.7 + 2.0)));
+  return out_ * (0.05 + 0.3 * rows);
+}
+// How far along a ray the land is met
+float toLand(vec3 ro, vec3 rd) {
+  float t = max(0.0, (TALLEST - ro.y) / rd.y), level = -ro.y / rd.y;
+  for (int i = 0; i < 96 && t < level; i++) {
+    vec3 g = ro + rd * t;
+    float d = g.y - land(g.xz);
+    if (d < 0.003) break;
+    t += max(d * 0.6, 0.004);
+  }
+  return min(t, level);
+}
+// Its colour at a place: sunlit patches and duller ones, the ruin's shadow across it, paling by steps into the sky
+vec3 landAt(vec3 g, vec2 s, float shade) {
+  float h = land(g.xz), crest = smoothstep(0.04, 0.3, h);
+  vec3 low = normalize(vec3(uLight.x, uLight.y * 0.4, uLight.z));   // the sun brought down low, so the rises throw shadows
+  float open = 1.0, t = 0.1;
+  for (int i = 0; i < 12; i++) { vec3 q = g + low * t; open = min(open, 5.0 * (q.y - land(q.xz)) / t); t += 0.14; if (open < 0.02) break; }
+  float patches = sin(g.x * 1.1 + 1.4 * sin(g.z * 1.7 + 0.6)) * sin(g.z * 1.3 + g.x * 0.5 + 2.0);
+  float lit = (0.6 + 0.25 * patches + 0.2 * crest) * (0.55 + 0.45 * clamp(open, 0.0, 1.0)) * (1.0 - 0.55 * shade);
+  vec3 grass = GRASS[int(banded(lit, 3.0) * 3.0 + 0.5)];
+  float far = banded(smoothstep(2.0, REACH, dot(g.xz, uBack)), 4.0);
+  return far > 0.99 ? beyond(s) : mix(grass, skyAt(s), far);
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 8.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = toLand(ro, rd), tHit = -1.0;
+  // Only rays that pass near the ruin need walking
+  vec3 oc = ro - HEART; float b = dot(oc, rd), disc = b * b - dot(oc, oc) + BOUND * BOUND;
+  if (disc > 0.0) {
+    float t = max(-b - sqrt(disc), 0.0), tEnd = min(-b + sqrt(disc), tFloor);
+    for (int i = 0; i < 110 && t < tEnd; i++) {
+      float d = map(ro + rd * t);
+      if (d < 0.003) { tHit = t; break; }
+      t += d * 0.7;   // weathered stone is too bumpy to trust a full step
+    }
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    float lit = max(dot(n, uLight), 0.0) * lightAt(p + n * 0.09);
+    float nook = clamp(0.5 + 0.5 * map(p + n * 0.1) / 0.1, 0.0, 1.0);
+    if (leaves(p) < rock(p)) col = leafTone((0.12 + lit * 0.7 + 0.18 * n.y + (noise(p * 14.0) - 0.5) * 0.2) * mix(0.6, 1.0, nook));
+    else {
+      float courses = (noise(vec3(p.x * 2.0, p.y * 16.0, p.z * 2.0)) - 0.5) * 0.16;
+      col = stoneTone((0.2 + lit * 0.95 + 0.1 * n.y + courses) * mix(0.5, 1.0, nook));
+    }
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    float dim = length(g - HEART) < 6.0 ? 1.0 - lightAt(g + vec3(0.0, 0.02, 0.0)) : 0.0;
+    col = landAt(g, s, stepped(dim, 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.6 }, uStone: { value: new THREE.Color() },
+  uGrowth: { value: 1 }, uRound: { value: 0 }, uBack: { value: new THREE.Vector2(0, -1) },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.95, 0) }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.6, 1.9 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.2 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 12;
+const P = params({
+  sun: { value: -50, min: -180, max: 180, kind: 'dial' },   // where the sun stands: 0 is behind you, negative to your left
+  stone: '#d99a62',                                          // the colour of the masonry
+  growth: [1, 0, 1.6],                                       // how overgrown it is
+});
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + 0.12 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  U.uBack.value.set(-Math.sin(yaw), -Math.cos(yaw));
+  // The sun keeps its place as the view sways, so the shadows lie still
+  const sun = 0.3 + view.yaw + P.sun * Math.PI / 180;
+  U.uLight.value.set(Math.sin(sun) * 0.75, 0.7, Math.cos(sun) * 0.75).normalize();
+
+  U.uStone.value.set(P.stone);
+  U.uGrowth.value = P.growth;
+  U.uRound.value = round;
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

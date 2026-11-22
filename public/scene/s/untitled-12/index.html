@@ -1,0 +1,277 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795220834191;window.__values={"size":1.2,"dune":0.435,"travel":1.2375,"sand":"#fff4d9"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Trojan horse</title>
+<style>
+  /* Layout: one picture filling the pane, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A sixteen second loop. Beyond the sand the sky curls from gold through rose into wine and plum. Cloud shadows drift over the sand as the camera cranes in and out. Seen from above, a black wooden Trojan horse, half sunk and rearing, faces you from far off on golden white sand. Low dunes roll away on every side."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uEye, uLight, uSand;
+uniform float uSpan, uSize, uDune, uDist, uRound;const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+// Black wood, and the few greys the light is allowed to pull out of it
+const vec3 WOOD[5] = vec3[5](vec3(0.03, 0.028, 0.04), vec3(0.12, 0.105, 0.13), vec3(0.23, 0.2, 0.22), vec3(0.4, 0.33, 0.31), vec3(0.66, 0.56, 0.48));
+const vec3 GOLD[3] = vec3[3](vec3(0.5, 0.33, 0.13), vec3(0.86, 0.62, 0.24), vec3(1.0, 0.87, 0.5));   // its fittings
+const vec3 HEART =vec3(0.0, 0.55, 0.0);   // middle of the horse, for the ball that bounds it
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// The thing: a horse rearing out of the sand, its hind half buried. It stands side-on, facing right, so its outline reads all the way round the camera's arc.
+vec3 toHorse(vec3 p) { p /= uSize; return vec3(0.997 * p.x + 0.071 * p.z, p.y, -0.071 * p.x + 0.997 * p.z); }
+float horse(vec3 q) {
+  vec3 m = vec3(q.xy, abs(q.z));
+  float d = rod(vec3(q.xy, q.z * 1.3), vec3(-0.3, -0.05, 0.0), vec3(0.08, 0.6, 0.0), 0.27, 0.23) / 1.3;   // barrel, sunk at the back, deeper than it is wide
+  d = smin(d, rod(q, vec3(0.1, 0.7, 0.0), vec3(0.27, 1.12, 0.0), 0.18, 0.105), 0.06);         // neck, long and arched
+  d = smin(d, rod(q, vec3(0.28, 1.16, 0.0), vec3(0.682, 0.959, 0.0), 0.125, 0.085), 0.04);   // head, long in the nose, held clear of the knees
+  d = smin(d, rod(m, vec3(0.25, 1.22, 0.06), vec3(0.19, 1.37, 0.075), 0.035, 0.015), 0.02);  // ears
+  d = min(d, rod(vec3(q.xy, q.z * 2.2), vec3(-0.1, 0.72, 0.0), vec3(0.13, 1.24, 0.0), 0.085, 0.07));   // a board of a mane down the neck
+  // Forelegs out in front as it rears, with sand showing between them and the chest. Each leaves the chest low, at the point of the shoulder.
+  // The near one is lifted: a forearm up to the knee, a thinner cannon hanging from it, a hoof that flares
+  d = smin(d, rod(q, vec3(0.17, 0.54, 0.12), vec3(0.5, 0.74, 0.14), 0.1, 0.068), 0.04);
+  d = smin(d, rod(q, vec3(0.5, 0.74, 0.14), vec3(0.48, 0.5, 0.14), 0.058, 0.05), 0.012);
+  d = min(d, rod(q, vec3(0.48, 0.5, 0.14), vec3(0.47, 0.43, 0.14), 0.055, 0.078));
+  // The far one reaches down for the sand, nearly straight
+  d = smin(d, rod(q, vec3(0.14, 0.37, -0.12), vec3(0.42, 0.3, -0.14), 0.1, 0.068), 0.04);
+  d = smin(d, rod(q, vec3(0.42, 0.3, -0.14), vec3(0.59, 0.15, -0.14), 0.058, 0.05), 0.012);
+  d = min(d, rod(q, vec3(0.59, 0.15, -0.14), vec3(0.64, 0.105, -0.14), 0.055, 0.074));
+  return d;
+}
+float map(vec3 p) { return horse(toHorse(p)) * uSize; }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.016, -0.016);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 44; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 4.2 * uSize + 0.4) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+// Tones in clean bands: flat colour, with dots only in a narrow seam where one band meets the next
+float banded(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps, f = fract(x); return min(floor(x) + (smoothstep(0.32, 0.68, f) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+// The land: sand, as high as land() says at each spot. Long low dunes one behind another, flat where the horse stands. Nothing beyond: it goes on for ever.
+float across(vec2 q) { return q.y * 0.75 + q.x * 0.3 + 0.6 * sin(q.x * 0.45 + 1.0) - 1.155; }   // how far across the dunes a spot is
+float land(vec2 q) {
+  float u = across(q) * 2.4;
+  float ridge = 0.5 + 0.5 * sin(u + 0.6 * sin(u));             // each rises slowly and drops away faster
+  float room = smoothstep(1.1, 2.8, length(q - vec2(0.3, -0.2)));
+  return uDune * 0.32 * ridge * ridge * room;
+}
+// How far along a ray the land is met
+float toLand(vec3 ro, vec3 rd) {
+  if (rd.y > -0.02) return 1e3;   // a ray that never comes down
+  float t = max(0.0, (0.4 + 0.85 * uDune - ro.y) / rd.y), level = -ro.y / rd.y;
+  for (int i = 0; i < 96 && t < level; i++) {
+    vec3 g = ro + rd * t;
+    float d = g.y - land(g.xz);
+    if (d < 0.003) break;
+    t += max(d / (0.5 - rd.y), 0.004);   // as far as the steepest slope allows
+  }
+  return min(t, level);
+}
+// Golden sand from its one colour: the lit white, and three warm shadows below it
+vec3 sandTone(int i) {
+  if (i <= 0) return uSand * vec3(0.76, 0.69, 0.66);
+  if (i == 1) return uSand * vec3(0.9, 0.85, 0.78);
+  if (i == 2) return uSand * vec3(0.97, 0.95, 0.9);
+  return uSand;
+}
+// Beyond: a wine-dark sky. Gold where it meets the sand, then rose and wine curling slowly up into plum.
+const vec3 SKY[5] = vec3[5](vec3(1.0, 0.86, 0.62), vec3(0.97, 0.63, 0.5), vec3(0.8, 0.36, 0.48), vec3(0.55, 0.19, 0.4), vec3(0.34, 0.11, 0.31));
+vec3 skyAt(vec3 rd) {
+  float h = (rd.y + 0.02) / 0.22, az = atan(rd.x, -rd.z);
+  float curl = sin(az * 7.0 + 2.2 * sin(h * 5.0 - az * 3.0 + uRound) + uRound);
+  return SKY[int(banded(h + 0.13 * curl * smoothstep(0.0, 0.3, h), 4.0) * 4.0 + 0.5)];
+}
+// Its colour at a place: sand lit by the low lamp, dunes shading the sand behind them, all of it paling into the foot of the sky far off
+vec3 landAt(vec3 g, vec2 s, float shade) {
+  float far = length(g - uEye);
+  if (far > 500.0) return skyAt(normalize(g - uEye));
+  float h = land(g.xz);
+  vec2 e = vec2(0.06, 0.0);
+  vec3 n = normalize(vec3(land(g.xz - e.xy) - land(g.xz + e.xy), 2.0 * e.x, land(g.xz - e.yx) - land(g.xz + e.yx)));
+  float open = 1.0, t = 0.1;
+  for (int i = 0; i < 12; i++) { vec3 q = g + uLight * t; open = min(open, 6.0 * (q.y - land(q.xz)) / t); t += 0.16; if (open < 0.02) break; }
+  float lit = max(dot(n, uLight), 0.0) * (0.35 + 0.65 * clamp(open, 0.0, 1.0)) * (1.0 - 0.5 * shade) + 0.1 * smoothstep(0.05, 0.5, h);
+  // Cloud shadows drifting over the sand, once across in a loop
+  float cloud = 0.6 * sin(g.x * 0.4 + g.z * 0.16 + uRound) + 0.4 * sin(g.x * 0.23 - g.z * 0.37 + 2.0 + uRound);
+  lit -= 0.13 * smoothstep(0.42, 0.72, cloud);
+  lit = mix(lit, uLight.y + 0.12, smoothstep(13.0, 32.0, far));   // far off it pales into the haze
+  return mix(sandTone(int(banded((lit - uLight.y + 0.245) / 0.33, 3.0) * 3.0 + 0.5)), SKY[0], banded(smoothstep(18.0, 46.0, far), 3.0));
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  // Rays fan out from the eye, so what is far is small
+  vec3 ro = uEye, rd = normalize(uFwd * uDist + uRight * at.x + uUp * at.y);
+  vec3 col = vec3(1.0);
+  float tFloor = toLand(ro, rd), tHit = -1.0;
+  // Only rays that pass near the horse need walking
+  vec3 oc = ro - HEART * uSize; float b = dot(oc, rd), disc = b * b - dot(oc, oc) + uSize * uSize;
+  if (disc > 0.0) {
+    float t = max(-b - sqrt(disc), 0.0), tEnd = min(-b + sqrt(disc), tFloor);
+    for (int i = 0; i < 64 && t < tEnd; i++) {
+      float d = map(ro + rd * t);
+      if (d < 0.003) { tHit = t; break; }
+      t += d;
+    }
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p), q = toHorse(p);
+    float lit = max(dot(n, uLight), 0.0) * lightAt(p + n * 0.03);
+    float sheen = pow(1.0 - max(dot(n, -rd), 0.0), 2.5) * clamp(0.5 + dot(n, uLight), 0.0, 1.0);
+    float tone = 0.12 + lit * 0.72 + sheen * 0.35;
+    if (fract(dot(q.xy, vec2(0.62, 0.78)) / 0.16) < 0.34) tone -= 0.2;   // the gaps between its planks
+    col = WOOD[int(stepped(tone, 4.0) * 4.0 + 0.5)];
+    // Its fittings are painted on: an eye, a collar, a band round the nose, hooves, and the hatch in its side
+    vec3 m = vec3(q.xy, abs(q.z));
+    vec2 nk = q.xy - vec2(0.1, 0.7), hd = q.xy - vec2(0.28, 1.16), br = q.xy - vec2(-0.3, -0.05);
+    float collar = dot(nk, vec2(0.375, 0.927)), collarOff = dot(nk, vec2(0.927, -0.375));
+    float nose = dot(hd, vec2(0.894, -0.447)), noseOff = dot(hd, vec2(0.447, 0.894));
+    vec2 hatch = vec2(dot(br, vec2(0.505, 0.863)) - 0.43, dot(br, vec2(0.863, -0.505)) + 0.01);
+    float frame = max(abs(hatch.x) - 0.13, abs(hatch.y) - 0.11);
+    bool gold = length(m - vec3(0.4, 1.13, 0.085)) < 0.045
+      || (collar > 0.02 && collar < 0.1 && collarOff > -0.12 && collarOff < 0.26)
+      || (nose > 0.27 && nose < 0.33 && abs(noseOff) < 0.16)
+      || length(q - vec3(0.47, 0.43, 0.14)) < 0.095 || length(q - vec3(0.64, 0.105, -0.14)) < 0.09
+      || (m.z > 0.12 && abs(frame) < 0.024);
+    if (gold) col = GOLD[lit > 0.3 ? 2 : (lit > 0.04 ? 1 : 0)];
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    float dim = 1.0 - lightAt(g + vec3(0.0, 0.02, 0.0));
+    col = landAt(g, s, stepped(dim, 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 2.4 }, uSize: { value: 1 }, uDune: { value: 1 },uSand: { value: V(1, 1, 1) },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uEye: { value: V() }, uDist: { value: 10 }, uRound: { value: 0 }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(3, 3 * rows / cols);   // wide, so the horse is small and far off
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.32 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.2, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 16;
+const P = params({
+  size: [1, 0.5, 1.6],       // how big the horse is, growing from where it meets the sand
+  dune: [1, 0, 1.5],         // how high the dunes roll
+  travel: [1, 0, 1.5],       // how far the camera cranes, arcs and pushes in; none holds the wide view still
+  sand: '#fff4d9',           // the sand where the light catches it; its golden shadows follow
+});
+// A colour as the three numbers it was picked as, however the param hands it over
+const tint = new THREE.Color();
+const rgb = c => { const hex = tint.set(c).getHexString(); return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255); };
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow, slight sway, so the shore stays level
+  // Where you are looking from: one long crane shot. It starts high and far off over the sands, arcs round the horse
+  // as it sinks and pushes in until the horse towers, then swings out the other side and climbs away again.
+  const push = 0.5 - 0.5 * Math.cos(round), far = (10 + P.travel * (4 - 6.5 * push)) / U.uDist.value;
+  const yaw = 0.4 * P.travel * Math.sin(round) + view.yaw, pitch = clamp(view.pitch + P.travel * (0.1 - 0.22 * push), 0.12, 1);
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  const up = U.uUp.value.crossVectors(right, fwd);
+  // The eye stands back from the horse, placed so the horse is right of and above the middle of the picture, nearer the middle as it closes in
+  U.uEye.value.set(0, 0.5 * P.size, 0).addScaledVector(fwd, -U.uDist.value * far).addScaledVector(right, -0.4 * U.uSpan.value * cols / rows * far)
+    .addScaledVector(up, -(0.4 - 0.2 * Math.min(P.travel, 1.5) * push) * U.uSpan.value * far);
+  // The light stays over your left shoulder, low, so shadows run long
+  // The sun stays where it is while the camera travels, so the shadows hold still on the sand
+  const sun = view.yaw;
+  U.uLight.value.set(Math.sin(sun) * 0.45 - Math.cos(sun) * 0.55, 0.35, Math.cos(sun) * 0.45 + Math.sin(sun) * 0.55).normalize();
+
+  U.uRound.value = round;
+  U.uSize.value = P.size; U.uDune.value = P.dune;
+  U.uSand.value.set(...rgb(P.sand));
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

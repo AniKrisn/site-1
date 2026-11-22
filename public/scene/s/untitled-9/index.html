@@ -1,0 +1,719 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794961728240;window.__values={"run":0.5,"dive":0.7,"ripple":0.35,"circles":0.54,"rings":0.54,"marble":0.54,"harlequin":0.54,"lotus":0.54,"weave":0.54,"stars":0.54,"chevron":0.54,"eyes":0.54,"tartan":0.54,"spiral":0.54,"black":0.54,"size":0.692,"man":"#ff4f5e","rim":1.3595,"width":0.7255,"ripples":1.3925,"colour":0.285,"hue":0,"navy":"#18264f","gold":"#c8a352","magenta":"#9a4a7c","pink":"#d8a3b5"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Night dive</title>
+<style>
+  /* Layout: a black page with one thing on it, drawn in chunky pixels. Deliberately dark-only. */
+  :root { --bg: #000000; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A loop of about eight seconds. A small astronaut in a white helmet sprints in out of total darkness at the lower left and dives headlong into the black. A dark green river spreads from the dive, running away to the top right, and is repainted eleven times over, each pattern arriving over the last in its own way: ripples, rings, marbling, harlequin diamonds, a lotus, a weave, stars, chevrons, blinking eyes, tartan and a spiral. He swims a front crawl up it through all of them, leaving a ribbon of colour in the water behind him, slips under at the far end as the river draws in around him, and it goes back to black."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight;
+uniform vec2 uJ[11];     // the man's joints, side on: hip, chest, head, then knee, foot, elbow, hand for each side
+uniform vec4 uAt;        // where the man is on the water (x, z), which way he faces, and his size
+uniform vec2 uDive;      // where he goes in, and every pattern spreads from
+uniform vec2 uCen, uCenPrev;   // where the pattern arriving now spreads from, and where the one before it did
+uniform vec3 uMan;       // his colour
+uniform vec4 uLine;      // the line the band of sea follows: a point on it and its direction
+uniform vec3 uPhase;     // which pattern is arriving now (10 is the black, 20 the circles), how far through arriving it is, and the one before it
+uniform vec2 uTrail[10]; // where he has just swum, newest first
+uniform vec3 uStep[4];   // where each foot of his run came down, and how long ago
+uniform vec2 uRing;      // once round the loop as an angle, and rings per unit
+uniform float uDrop;     // seconds since he broke the surface
+uniform float uSpan, uRim, uShow, uWidth;
+uniform float uColour;        // how much of its colour the sea keeps
+uniform float uHue, uGlow;   // how far the sea's green is turned towards another colour, and how many lights are up off the water
+uniform float uRoll, uSwim;  // how far he has rolled onto one shoulder, and how much he is up and swimming
+uniform vec3 uNavy, uGold, uMagenta, uPink;
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+// Nearly black, and the few cold tones the light picks off his edges
+const vec3 MAN[4] = vec3[4](vec3(0.015, 0.015, 0.03), vec3(0.09, 0.10, 0.16), vec3(0.24, 0.27, 0.38), vec3(0.60, 0.66, 0.80));
+// The paints that go between the four you can pick, all a little dusty
+const vec3 BLUE = vec3(0.24, 0.36, 0.58), TEAL = vec3(0.25, 0.47, 0.50), SAGE = vec3(0.48, 0.58, 0.43), ORANGE = vec3(0.76, 0.47, 0.29);
+const vec3 CREAM = vec3(0.92, 0.87, 0.76), RED = vec3(0.70, 0.27, 0.24), MOUND = vec3(0.03, 0.035, 0.08);
+const float TAU = 6.2832;
+
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// The thing: a small man in a coat, each arm and leg its own
+const float HEAD = 0.084;   // a big round head, so he reads as a little person and not a stick
+// Into his own space: moved to where he is, turned to face his way, and scaled about his feet
+vec3 local(vec3 w) {
+  vec2 o = w.xz - uAt.xy; float cs = cos(uAt.z), sn = sin(uAt.z);
+  vec3 p = vec3(o.x * cs + o.y * sn, w.y, o.y * cs - o.x * sn) / uAt.w;
+  float cr = cos(uRoll), sr = sin(uRoll); p.yz = vec2(p.y * cr + p.z * sr, p.z * cr - p.y * sr);   // rolled about the waterline
+  return p;
+}
+float map(vec3 w) {
+  vec3 p = local(w);
+  float d = rod(p, vec3(uJ[1], 0.0), vec3(uJ[0], 0.0), 0.085, 0.07);                                     // suit
+  vec2 spine = normalize(uJ[1] - uJ[0]), backw = vec2(-spine.y, spine.x);
+  d = smin(d, rod(p, vec3(uJ[0] + spine * 0.05 + backw * 0.09, 0.0), vec3(uJ[1] + backw * 0.09, 0.0), 0.05, 0.055), 0.015);   // the pack on his back
+  d = smin(d, ball(p, vec3(uJ[2], 0.0) + vec3(normalize(uJ[2] - uJ[1]) * 0.03, 0.0), HEAD), 0.02);                                                    // head
+  for (int k = 0; k < 2; k++) {
+    float side = k == 0 ? -1.0 : 1.0; int i = 3 + k * 4;
+    vec3 knee = vec3(uJ[i], 0.06 * side), elbow = vec3(uJ[i + 2], 0.1 * side);
+    d = smin(d, min(rod(p, vec3(uJ[0], 0.045 * side), knee, 0.04, 0.034), rod(p, knee, vec3(uJ[i + 1], 0.07 * side), 0.034, 0.03)), 0.02);   // leg
+    d = smin(d, min(rod(p, vec3(uJ[1], 0.09 * side), elbow, 0.032, 0.028), rod(p, elbow, vec3(uJ[i + 3], 0.09 * side), 0.028, 0.024)), 0.02); // arm
+  }
+  return d * uAt.w;
+}
+// What he is wearing, painted on by where a spot is on him: a white helmet with a dark visor that catches the light, a pale pack,
+// white boots, gloves and belt, and the rest of the suit in his own colour
+vec3 suit(vec3 lp) {
+  vec2 spine = normalize(uJ[1] - uJ[0]), backw = vec2(-spine.y, spine.x), h = lp.xy - uJ[2] - normalize(uJ[2] - uJ[1]) * 0.03;
+  vec3 white = vec3(0.96, 0.95, 0.9);
+  if (length(vec3(h, lp.z)) < HEAD + 0.012) {
+    if (dot(h, -backw) > 0.028 && abs(lp.z) < 0.062 && abs(dot(h, spine)) < 0.052) return dot(h, spine) > 0.012 ? vec3(0.45, 0.62, 0.85) : vec3(0.07, 0.09, 0.2);
+    return white;
+  }
+  if (rod(lp, vec3(uJ[0] + spine * 0.05 + backw * 0.09, 0.0), vec3(uJ[1] + backw * 0.09, 0.0), 0.05, 0.055) < 0.012) return vec3(0.76, 0.79, 0.84);
+  if (min(length(lp.xy - uJ[4]), length(lp.xy - uJ[8])) < 0.055 || min(length(lp.xy - uJ[6]), length(lp.xy - uJ[10])) < 0.045) return white;
+  if (abs(dot(lp.xy - uJ[0], spine) - 0.03) < 0.016) return white;
+  return uMan;
+}
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.012, -0.012);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+// How wide the river is at a place along it: it narrows as it goes away, which is most of what makes it look far, and its banks waver
+float bankAt(float along) {
+  return uWidth * mix(1.3, 0.45, smoothstep(-1.0, 4.2, along)) * (1.0 + 0.1 * sin(along * 4.0 + uRing.x * 3.0) + 0.06 * sin(along * 9.0 + 1.0 + uRing.x * 5.0));   // the wavering runs down river with the current
+}
+// Where a spot on the river is in the pattern painted on it. The pattern is drawn as if the river were as wide all the way
+// along, so on the picture it shrinks with the river as it goes away, across and lengthways alike.
+vec2 warp(vec2 p) {
+  vec2 o = p - uLine.xy; float al = dot(o, uLine.zw), acc = 0.0;
+  for (int i = 0; i < 6; i++) acc += 1.1 / mix(1.3, 0.45, smoothstep(-1.0, 4.2, al * (float(i) + 0.5) / 6.0));
+  return uLine.xy + uLine.zw * acc * al / 6.0 + vec2(-uLine.w, uLine.z) * dot(o, vec2(-uLine.w, uLine.z)) * 1.1 / mix(1.3, 0.45, smoothstep(-1.0, 4.2, al));
+}
+const vec2 SCALE = vec2(0.34, 0.8);   // how far apart the scalloped circles sit, across and going away
+const float FULL = 5.6;               // how far the circles have lit by the time they are everywhere you can see
+// The circles' paints, cold and dark first
+vec3 paint(float p) {
+  vec3 T[9] = vec3[9](uNavy, BLUE, TEAL, SAGE, uGold, ORANGE, uMagenta, uPink, CREAM);
+  return T[int(clamp(p, 0.0, 8.0))];
+}
+// Circles: rows of scalloped waves, nearer ones over farther ones, each lighting up whole as the colour reaches it.
+// The last number says whether there is a lit wave here at all.
+vec4 circles(vec3 g, float reach) {
+  vec2 uv = g.xz / SCALE, across = vec2(-uLine.w, uLine.z);
+  float J = floor(uv.y * 2.0);
+  for (int a = 2; a >= -1; a--) {
+    float j = J + float(a), off = mod(j, 2.0) * 0.5, i0 = floor(uv.x - off);
+    for (int b = 0; b < 2; b++) {
+      vec2 id = vec2(i0 + float(b), j);
+      float h = hash2(id), h2 = hash2(id + 7.3);
+      vec2 c = vec2(id.x + off, j * 0.5 + 0.09 * sin(uRing.x * 6.0 + h * TAU));   // each wave heaves
+      float dd = length(uv - c) / 0.62;
+      if (dd >= 1.0) continue;
+      // Is this wave lit yet: reached by the colour, and inside the band
+      vec2 cw = vec2(id.x + off, j * 0.5) * SCALE;
+      float far = length(cw - uDive) + (h2 - 0.5) * 0.3, since = reach - far;
+      if (since <= 0.0) continue;
+      if (abs(dot(cw - uLine.xy, across)) > bankAt(dot(cw - uLine.xy, uLine.zw)) * (0.85 + 0.3 * h)) continue;
+      // Which paint: every wave a little off its neighbours, with rings running out through them
+      float ring = sin(far * 3.1416 * uRing.y - uRing.x * 18.0);
+      float p = clamp(min(since * 0.9, 1.6) + ((h - 0.5) * 2.4 + 1.0 * ring) * mix(0.3, 1.0, smoothstep(0.0, 2.5, since)), 0.0, 2.9);
+      if (ring > 0.93) p = 4.0;              // the odd gold ripple
+      vec3 A = paint(p), B = paint(p + 1.0), C = paint(p < 4.0 ? p + 4.0 : p - 4.0);
+      float ang = atan(uv.y - c.y, uv.x - c.x);
+      bool bead = sin(ang * 14.0) > 0.0, speck = hash2(floor(g.xz * vec2(40.0, 17.0))) < 0.07;
+      bool check = ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) == 0;
+      if (hash2(id + 3.1) < 0.08) return vec4(dd > 0.8 ? (bead ? RED : MOUND) : (speck ? BLUE : MOUND), 1.0);   // now and then a dark mound, beaded red
+      if (dd > 0.8) return vec4(bead ? CREAM : B, 1.0);                                                           // foam, in dabs along the crest
+      if (speck) return vec4(C, 1.0);
+      return vec4(dd > 0.5 ? A : dd > 0.28 ? (check ? A : B) : B, 1.0);
+    }
+  }
+  return vec4(0.0);
+}
+// The other ten. Each takes a place as seen on the screen, measured from the dive, and the loop as an angle to move by.
+// 0, rings: the dive's own ripples grown bold, running outwards
+vec3 rings(vec2 q, float a) {
+  float r = length(q), ang = atan(q.y, q.x);
+  float f = fract((r + 0.05 * sin(ang * 5.0 + r * 3.0 + a * 3.0)) * 1.75 * uRing.y - a / TAU * 9.0);
+  return f < 0.42 ? uNavy : f < 0.52 ? CREAM : f < 0.8 ? BLUE : f < 0.87 ? uGold : TEAL;
+}
+// 1, marble: wandering bands of ink
+vec3 marble(vec2 q, float a) {
+  float f = fract((q.y * 16.0 + 3.6 * sin(q.x * 3.0 + a * 2.0) + 2.0 * sin(q.x * 7.0 - q.y * 4.0 - a * 4.0)) / TAU);
+  return f < 0.3 ? uNavy : f < 0.42 ? CREAM : f < 0.7 ? uMagenta : f < 0.8 ? uGold : TEAL;
+}
+// 2, harlequin: tall diamonds, a stud in each
+vec3 harlequin(vec2 q, float a) {
+  q.x += 0.08 * sin(q.y * 6.0 + a * 3.0);
+  vec2 d = vec2(q.x + q.y * 1.6, q.x - q.y * 1.6) * 3.2, id = floor(d), f = fract(d) - 0.5;
+  bool odd = mod(id.x + id.y, 2.0) > 0.5;
+  if (max(abs(f.x), abs(f.y)) < 0.13) return odd ? uNavy : uGold;
+  return odd ? TEAL : (hash2(id) < 0.25 ? BLUE : uNavy);
+}
+// 3, lotus: rings of petals about the dive, each ring turning against the next
+vec3 lotus(vec2 q, float a) {
+  float rad = length(q) * 3.5, ring = floor(rad), fr = fract(rad), dir = mod(ring, 2.0) < 0.5 ? 1.0 : -1.0;
+  float t = abs(fract((atan(q.y, q.x) + dir * a * 2.0) / TAU * (6.0 + ring * 4.0)) - 0.5) * 2.0, tip = 1.0 - t * t;
+  vec3 T[5] = vec3[5](mix(uMagenta, uNavy, 0.55), BLUE, TEAL, mix(uMagenta, uNavy, 0.55), BLUE);   // dusky, so he shows against them
+  if (fr > tip) return uNavy;
+  if (fr > tip - 0.2) return SAGE;
+  return t < 0.14 && fr > 0.25 ? T[int(mod(ring + 2.0, 5.0))] : T[int(mod(ring, 5.0))];
+}
+// 4, weave: ribbons going over and under
+vec3 weave(vec2 q, float a) {
+  vec2 p = q * 7.0 + a / TAU * 4.0, id = floor(p), f = fract(p);
+  bool over = mod(id.x + id.y, 2.0) > 0.5;
+  float along = over ? f.x : f.y, thick = over ? f.y : f.x;
+  if (thick < 0.14 || thick > 0.86) return uNavy;
+  vec3 A[3] = vec3[3](SAGE, TEAL, SAGE * 0.8), B[3] = vec3[3](BLUE, mix(uNavy, BLUE, 0.5), mix(uMagenta, uNavy, 0.55));
+  vec3 c = over ? A[int(mod(id.y, 3.0))] : B[int(mod(id.x, 3.0))];
+  return along < 0.17 || along > 0.83 ? c * 0.62 : c;
+}
+// 5, stars: a dark sky, a drift of cloud, stars that twinkle
+vec3 stars(vec2 q, float a) {
+  vec2 p = q * 5.0, id = floor(p), f = fract(p) - 0.5 - (vec2(hash2(id + 1.7), hash2(id + 4.1)) - 0.5) * 0.5;
+  float h = hash2(id), arm = min(abs(f.x), abs(f.y)), out_ = max(abs(f.x), abs(f.y));
+  vec3 col = uNavy * 0.6;
+  if (0.5 + 0.5 * sin(q.x * 3.0 + q.y * 5.0 + a * 3.0) > 0.6 + 0.4 * dots()) col = mix(uNavy, uMagenta, 0.35);
+  if (h < 0.5) { if (out_ < 0.1 + 0.22 * step(h, 0.3) * (0.5 + 0.5 * sin(a * 12.0 + h * 40.0)) && arm < 0.06) col = h < 0.15 ? uGold : CREAM; }
+  else if (h < 0.8 && length(f) < 0.06) col = uPink;
+  return col;
+}
+// 6, chevron: zigzag bands marching
+vec3 chevron(vec2 q, float a) {
+  vec3 T[5] = vec3[5](TEAL, uNavy, SAGE, mix(uMagenta, uNavy, 0.55), BLUE);
+  return T[int(mod(floor(q.y * 6.0 + abs(fract(q.x * 2.5) - 0.5) * 3.0 - a / TAU * 24.0), 5.0))];
+}
+// 7, eyes: rows of eyes that look about and blink
+vec3 eyes(vec2 q, float a) {
+  vec2 p = q * vec2(3.0, 4.5); float row = floor(p.y); p.x += 0.5 * mod(row, 2.0);
+  vec2 id = vec2(floor(p.x), row), f = (fract(p) - 0.5) / vec2(3.0, 4.5);
+  float h = hash2(id), shut = smoothstep(0.9, 1.0, sin(a * 8.0 + h * TAU));
+  float lid = 0.075 * (1.0 - shut) * (1.0 - pow(f.x / 0.13, 2.0));
+  if (abs(f.x) < 0.13 && abs(f.y) < lid) {
+    float d = length(f - 0.03 * vec2(cos(a * 5.0 + h * 40.0), 0.3 * sin(a * 5.0 + h * 40.0)));
+    return d < 0.022 ? MOUND : d < 0.052 ? (h < 0.5 ? TEAL : uGold) : CREAM;
+  }
+  if (abs(f.x) < 0.145 && abs(f.y) < max(lid, 0.0) + 0.016) return uNavy;
+  return hash2(floor(q * 50.0)) < 0.06 ? BLUE : mix(uNavy, TEAL, 0.5);
+}
+// 8, tartan: stripes crossing, the threads showing where they meet
+vec3 thread(float f) { return f < 0.4 ? TEAL : f < 0.7 ? uNavy : f < 0.78 ? TEAL : f < 0.84 ? uGold : f < 0.93 ? TEAL : RED; }
+vec3 tartan(vec2 q, float a) {
+  vec2 f = fract(q * 2.2 + vec2(a / TAU * 3.0, 0.0));
+  return ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 3) < 2 ? thread(f.x) : thread(f.y);
+}
+// 9, spiral: three arms winding into the dive
+vec3 spiral(vec2 q, float a) {
+  vec3 T[4] = vec3[4](uNavy, uPink, ORANGE, CREAM);
+  return T[int(fract(atan(q.y, q.x) * 3.0 / TAU + log(length(q) + 0.05) * 1.6 - a / TAU * 5.0) * 4.0)];
+}
+// Any of the nine, or the black that ends it; black too wherever the band of sea does not reach
+vec3 paintAt(float k, vec3 g);
+// The sea as a river sunk a little into the dark. It dims by steps as it goes away; the far bank shows its face above the water,
+// with pale shallows under it, and the near bank throws a shadow along its own edge.
+vec3 pattern(float k, vec3 g) {
+  if (k > 9.5 && k < 19.5) return vec3(0.0);
+  vec2 o = g.xz - uLine.xy; float along = dot(o, uLine.zw), side = dot(o, vec2(-uLine.w, uLine.z)), w = bankAt(along);
+  float away = smoothstep(0.6, 4.2, along), dim = 1.0 - 0.5 * stepped(away, 3.0);
+  if (k > 19.5) return paintAt(k, g) * dim;   // the circles keep their own ragged edge
+  if (side > w) return (side - w) / mix(1.0, 0.45, away) < 0.035 ? vec3(0.11, 0.14, 0.12) * dim : vec3(0.0);   // the lip of the near bank
+  if (side < -w) {
+    // The far bank is a wall standing out of the water: dark at the waterline, a little lighter above, with a lit top edge
+    float up = (-side - w) / mix(1.0, 0.45, away);
+    float tuft = floor(along * 22.0);   // reeds along the top of it, some taller than others
+    if (up > 0.21) return hash2(vec2(tuft, 3.0)) < 0.35 && up < 0.23 + 0.1 * hash2(vec2(tuft, 8.0)) ? vec3(0.1, 0.2, 0.12) * dim : vec3(0.0);
+    return (up > 0.17 ? vec3(0.22, 0.27, 0.22) : up > 0.07 ? vec3(0.075, 0.1, 0.085) : vec3(0.035, 0.05, 0.045)) * dim;
+  }
+  vec2 wp = warp(g.xz);
+  vec3 c = paintAt(k, vec3(wp.x, 0.0, wp.y));
+  // The current: short pale streaks on the surface, sliding down river towards you, some lanes quicker than others
+  float lane = floor(dot(wp - uLine.xy, vec2(-uLine.w, uLine.z)) * 12.0);
+  float run = dot(wp - uLine.xy, uLine.zw) * 0.55 + uRing.x / TAU * (1.0 + mod(lane, 2.0)) + hash2(vec2(lane, 4.0));
+  if (hash2(vec2(lane, 6.0)) < 0.45 && fract(run) < 0.12) c = c * 1.5 + 0.05;
+  // A slow swell rolling down it: lighter on the backs of the waves, darker in the hollows, so the surface has a shape
+  vec2 wo = wp - uLine.xy;
+  c *= 1.0 + 0.27 * sin(dot(wo, uLine.zw) * 4.0 + uRing.x * 2.0 + 1.3 * sin(dot(wo, vec2(-uLine.w, uLine.z)) * 2.5 + uRing.x));
+  if (side / w > 0.84 + 0.05 * (dots() - 0.5)) c *= 0.5;
+  if (side / w < -0.9) c = mix(c, vec3(0.75, 0.8, 0.75), 0.4);
+  // Rocks standing in the river: lit on top, foam piling against the side the water comes from, a wake trailing down river
+  float tp = mix(1.0, 0.45, away);
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i), da = (along - (0.8 + 1.05 * fi)) / tp, ds = (side - (mod(fi, 2.0) < 0.5 ? 0.6 : -0.62) * w) / tp, r = length(vec2(da, ds * 1.5));
+    if (r < 0.11) { float lit = -ds * 1.5 - 0.4 * da; return (lit > 0.035 ? vec3(0.42, 0.46, 0.42) : lit > -0.04 ? vec3(0.17, 0.19, 0.18) : vec3(0.05, 0.06, 0.06)) * dim; }
+    if (r < 0.16 && da > -0.03 && hash2(floor(g.xz * 40.0) + floor(uRing.x / TAU * 90.0) + fi) < 0.6) c = vec3(0.8, 0.86, 0.8);
+    if (da < 0.0 && da > -0.6 && abs(abs(ds) - (0.09 - 0.22 * da)) < 0.022 && 1.0 + da / 0.6 > dots()) c = c * 1.5 + 0.05;
+  }
+  return c * dim;
+}
+vec3 paintAt(float k, vec3 g) {
+  if (k > 19.5) { vec4 c = circles(g, FULL); return c.a > 0.5 ? c.rgb : vec3(0.0); }
+  if (k > 9.5) return vec3(0.0);
+  vec2 q = (g.xz - warp(abs(k - uPhase.x) < 0.5 ? uCen : uCenPrev)) * vec2(1.0, 0.41); float a = uRing.x;
+  if (k < 0.5) return rings(q, a);
+  if (k < 1.5) return marble(q, a);
+  if (k < 2.5) return harlequin(q, a);
+  if (k < 3.5) return lotus(q, a);
+  if (k < 4.5) return weave(q, a);
+  if (k < 5.5) return stars(q, a);
+  if (k < 6.5) return chevron(q, a);
+  if (k < 7.5) return eyes(q, a);
+  if (k < 8.5) return tartan(q, a);
+  return spiral(q, a);
+}
+
+// Whether the newest pattern has got to this spot yet. Each arrives in its own manner; u goes from 0 to 1 as it does.
+bool arrived(float k, vec2 q, float u) {
+  if (u >= 1.0) return true;
+  float a = uRing.x, rq = length(q), near = rq / 5.0;
+  // rings: they run out from the dive one after another, the way the first ripples did
+  if (k < 0.5) return rq + 0.2 * (dots() - 0.5) < u * 5.0;
+  // marble: thin lines of ink seep out from the dive and swell into bands
+  if (k < 1.5) {
+    float f = fract((q.y * 16.0 + 3.6 * sin(q.x * 3.0 + a * 2.0) + 2.0 * sin(q.x * 7.0 - q.y * 4.0 - a * 4.0)) / TAU);
+    return abs(fract(f - 0.06) - 0.5) * 2.0 < clamp(u * 2.0 - near, 0.0, 1.0) * 1.2;
+  }
+  // harlequin: diamonds grow from their middles, one colour of the board ahead of the other
+  if (k < 2.5) {
+    vec2 w = vec2(q.x + 0.08 * sin(q.y * 6.0 + a * 3.0), q.y);
+    vec2 d = vec2(w.x + w.y * 1.6, w.x - w.y * 1.6) * 3.2, id = floor(d), f = fract(d) - 0.5, c = id + 0.5;
+    float rc = length(vec2(c.x + c.y, (c.x - c.y) / 1.6)) / 6.4 / 5.0;
+    return max(abs(f.x), abs(f.y)) < 0.55 * clamp(u * 2.4 - rc - 0.3 * mod(id.x + id.y, 2.0), 0.0, 1.0);
+  }
+  // lotus: it opens from the heart, each ring of petals unfolding after the one inside it
+  if (k < 3.5) {
+    float rad = rq * 3.5, ring = floor(rad), dir = mod(ring, 2.0) < 0.5 ? 1.0 : -1.0, grow = clamp(u * 20.0 - ring, 0.0, 1.0);
+    float t = abs(fract((atan(q.y, q.x) + dir * a * 2.0) / TAU * (6.0 + ring * 4.0)) - 0.5) * 2.0;
+    return grow > 0.9 || fract(rad) < (1.0 - t * t) * grow;
+  }
+  // weave: each ribbon is drawn out both ways from the dive, across and then away, no two at quite the same time
+  if (k < 4.5) {
+    vec2 id = floor(q * 7.0 + a / TAU * 4.0);
+    return mod(id.x + id.y, 2.0) > 0.5 ? abs(q.x) < 5.8 * clamp(u * 1.7 - 0.6 * hash2(vec2(id.y, 3.0)), 0.0, 1.0)
+                                       : abs(q.y) < 2.6 * clamp(u * 1.7 - 0.6 * hash2(vec2(id.x, 8.0)), 0.0, 1.0);
+  }
+  // stars: night falls, dot by dot
+  if (k < 5.5) return dots() < clamp(u * 1.6 - 0.5 * near, 0.0, 1.0) * 1.1;
+  // chevron: the zigzag bands march up from the bottom, a whole band at a time
+  if (k < 6.5) return floor(q.y * 6.0 + abs(fract(q.x * 2.5) - 0.5) * 3.0 - a / TAU * 24.0) + a / TAU * 24.0 > 16.0 - u * 32.0;
+  // eyes: every eye opens, and what is behind the lids is the new pattern
+  if (k < 7.5) {
+    vec2 p = q * vec2(3.0, 4.5); float row = floor(p.y); p.x += 0.5 * mod(row, 2.0);
+    vec2 c = fract(p) - 0.5;
+    return abs(c.y) < pow(clamp(u * 1.9 - 0.5 * hash2(vec2(floor(p.x), row)) - 0.4 * near, 0.0, 1.0), 2.0) * 2.5 * (1.2 - 4.0 * c.x * c.x);
+  }
+  // tartan: threads are run down from the top and in from the left, as on a loom
+  if (k < 8.5) return ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 3) < 2
+    ? (q.y + 2.6) / 5.0 < u * 1.5 - 0.5 * hash2(vec2(floor((q.x * 2.2 + a / TAU * 3.0) * 12.0), 1.0))
+    : (q.x + 2.6) / 7.6 < u * 1.5 - 0.5 * hash2(vec2(floor(q.y * 26.4), 2.0));
+  // spiral: three thin arms wind out of the dive and fatten until they meet
+  if (k < 9.5) return fract(atan(q.y, q.x) * 3.0 / TAU + log(rq + 0.05) * 1.6 - a / TAU * 5.0) < u;
+  // black: the sea draws back into the point he goes under at
+  return rq + 0.12 * (dots() - 0.5) > 6.5 * (1.0 - u) * (1.0 - u);
+}
+
+// The land: black, until the dive shows it to be a sea. Each pattern comes in over the one before, from where he went in.
+vec3 landAt(vec3 g, vec2 s, float shade) {
+  vec3 col = vec3(0.0);
+  // The first ripples, barely there
+  float r = length(g.xz - uDive), fade = 1.0 - uDrop / 0.6;   // gone by the time the first pattern sets off
+  vec3 wet = mix(uNavy * 1.3 + vec3(0.07, 0.08, 0.12), CREAM, clamp(1.0 - uDrop / 0.45, 0.0, 1.0));   // bright at the splash, dimming as they go
+  for (int k = 0; k < 5; k++) {
+    float rad = 1.4 * (uDrop - 0.09 * float(k));
+    if (rad > 0.0 && abs(r - rad) < 0.035 && fade > dots()) col = wet;
+  }
+  if (uDrop > 0.0 && uDrop < 0.6) {
+    // The splash itself: a white burst where he goes in, and spray thrown out from it, each drop its own distance
+    float ang = atan(g.z - uDive.y, g.x - uDive.x) / TAU * 26.0, h = hash2(vec2(floor(ang), 5.0));
+    float out_ = (0.5 + 1.6 * h) * uDrop * (1.0 - 0.7 * uDrop);
+    if (r < 0.2 - uDrop * 1.4) col = CREAM;
+    if (abs(r - out_) < 0.05 && abs(fract(ang) - 0.5) < 0.22 && 1.0 - uDrop / 0.6 > dots()) col = CREAM;
+  }
+  // Each footfall of his run leaves a small ring too: the dark he runs on is already water
+  for (int i = 0; i < 4; i++) {
+    float age = uStep[i].z, rs = length(g.xz - uStep[i].xy);
+    if (age > 0.0 && age < 0.55 && (abs(rs - 0.55 * age) < 0.022 || abs(rs - 0.3 * age) < 0.018) && 1.0 - age / 0.55 > dots()) col = vec3(0.5, 0.6, 0.55);
+  }
+  float k = uPhase.x;
+  if (k < -0.5) return col;
+  // The newest pattern where it has arrived; the one before it elsewhere
+  if (k > 19.5) { vec4 c = circles(g, uPhase.y * FULL * 1.5); if (c.a > 0.5) return c.rgb; }   // circles light up one by one, outwards
+  else if (arrived(k, (warp(g.xz) - warp(uCen)) * vec2(1.0, 0.41), uPhase.y)) return pattern(k, g);
+  return uPhase.z < -0.5 ? col : pattern(uPhase.z, g);
+}
+
+// How far a spot is from the ribbon of water he has just swum through, which is wide behind him and thins to nothing
+float toTrail(vec2 p) {
+  float best = 1.0;
+  for (int i = 0; i < 9; i++) {
+    vec2 a = uTrail[i], ba = uTrail[i + 1] - a, pa = p - a;
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+    best = min(best, length(pa - ba * h) - mix(0.38, 0.05, (float(i) + h) / 9.0) * uAt.w);
+  }
+  return best;
+}
+// The sea without its colour: a few dark greens, like an old screen, with dots only where one tone meets the next
+// It is not one flat green, though: paint is stirred through it, slow and thick, in swirls that fold back on themselves
+float flow(vec2 p) {
+  vec2 uv = p * vec2(1.0, 0.41) * 1.5; float a = uRing.x;
+  for (int i = 0; i < 4; i++) {
+    vec2 u2 = uv + sin(max(uv.x, uv.y));
+    uv += 0.5 * vec2(cos(5.11 + 0.353 * u2.y + 1.2 * sin(a)), sin(u2.x - 1.1 * cos(a)));
+    uv -= cos(uv.x + uv.y) - sin(uv.x * 0.711 - uv.y);
+  }
+  return 0.5 + 0.5 * sin(length(uv) * 0.9 + a * 2.0);
+}
+// Three paints, five tones each: emerald, a colder teal, and a thin sheen that goes from violet through bronze to pale gold
+vec3 phosphor(float g, vec2 p) {
+  vec3 T[15] = vec3[15](
+    vec3(0.012, 0.045, 0.03), vec3(0.04, 0.14, 0.09), vec3(0.09, 0.30, 0.17), vec3(0.22, 0.52, 0.30), vec3(0.60, 0.82, 0.55),
+    vec3(0.01, 0.04, 0.055), vec3(0.03, 0.12, 0.16), vec3(0.06, 0.26, 0.31), vec3(0.16, 0.46, 0.49), vec3(0.50, 0.80, 0.75),
+    vec3(0.035, 0.02, 0.06), vec3(0.11, 0.06, 0.17), vec3(0.24, 0.17, 0.21), vec3(0.47, 0.42, 0.22), vec3(0.86, 0.82, 0.50));
+  float f = flow(p), x = clamp(g * 1.2 + (f - 0.5) * 0.14, 0.0, 1.0) * 4.0, edge = f + 0.06 * (dots() - 0.5);
+  int tone = min(int(x) + (smoothstep(0.3, 0.7, fract(x)) > dots() ? 1 : 0), 4);
+  // Turned round the colour wheel by however much is asked, light and dark left as they are
+  vec3 c = T[(edge > 0.995 ? 10 : edge > 0.88 ? 5 : 0) + tone], axis = vec3(0.57735);
+  return max(c * cos(uHue) + cross(axis, c) * sin(uHue) + axis * dot(axis, c) * (1.0 - cos(uHue)), 0.0);   // mostly emerald; the teal in veins, the sheen only in threads
+}
+
+void main() {
+  vec2 s =(gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(0.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0, t = 0.0, close = 1.0;
+  for (int i = 0; i < 64 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    close = min(close, d);
+    if (d < 0.003) { tHit = t; break; }
+    t += d * 0.9;
+  }
+  if (tHit > 0.0) {
+    // Lit only at his edges, so he is a shape in the dark; he comes out of it in dots
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    float rim = pow(1.0 - max(dot(n, -uFwd), 0.0), 2.0);
+    float tone = (max(dot(n, uLight), 0.0) * 0.7 + rim * 0.35) * uRim;
+    float level = stepped(tone, 3.0);
+    vec3 paintOn = suit(local(p));
+    col = uShow > dots() ? mix(paintOn * (0.64 + 0.36 * min(level * 1.5, 1.0)), vec3(1.0), level > 0.9 ? 0.45 : 0.0) : vec3(0.0);
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    col = landAt(g, s, 0.0);
+    {
+      // The sea is in black and white; only he has colour, and he leaves a tapering trail of it where he has swum
+      bool trail = uSwim > 0.5 && toTrail(g.xz) + 0.025 * sin(g.x * 21.0 + g.z * 33.0 + uRing.x * 6.0) < 0.05 * (dots() - 0.5);
+      float grey = dot(col, vec3(0.3, 0.59, 0.11));
+      if (trail) col = clamp(mix(vec3(grey), col, 2.0) * 1.4 + 0.07, 0.0, 1.0);   // the trail much richer and brighter than the paint, so it shows even over the dark parts
+      else if (grey > 0.003) col = mix(phosphor(grey, g.xz), col, uColour);
+      if (grey > 0.003 && uGlow > 0.0) {
+        // Small things in the water, barely there: a few fish going up river as slips of shadow, and now and then a glint
+        vec2 o = g.xz - uLine.xy; float pa = dot(o, uLine.zw), ps = dot(o, vec2(-uLine.w, uLine.z));
+        for (int i = 0; i < 5; i++) {
+          float fi = float(i), al = mix(-0.6, 3.8, fract(uRing.x / TAU * (1.0 + mod(fi, 2.0)) + hash2(vec2(fi, 7.0))));
+          float sd = (hash2(vec2(fi, 9.0)) - 0.5) * 1.2 * bankAt(al) + 0.05 * sin(uRing.x * 3.0 + fi * 2.0), da = abs(pa - al);
+          if (da < 0.09 && abs(ps - sd) < 0.024 * (1.0 - 0.7 * da / 0.09)) col *= 0.62;
+        }
+        if (!trail && hash2(floor(g.xz * vec2(30.0, 14.0)) + floor(uRing.x / TAU * 72.0)) < 0.004) col = min(col * 1.6 + 0.08, 1.0);
+      }
+    }
+    if (uShow > 0.5 && col.r + col.g + col.b > 0.02 && length(g.xz - uAt.xy) < 0.9 * uAt.w) {
+      // His reflection, broken up by the water: look up from the surface the way a mirror would and see if he is there
+      vec3 from = g + vec3(0.02 * sin(g.z * 40.0 + uRing.x * 8.0), 0.01, 0.0), up = vec3(rd.x, -rd.y, rd.z);
+      float rt = 0.0;
+      for (int i = 0; i < 12; i++) { float d = map(from + up * rt); if (d < 0.004) { if (((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) == 0) col = uMan * 0.55; break; } rt += d; if (rt > 1.2) break; }
+    }
+    if (uSwim > 0.0) {
+      // Foam where he breaks the water, froth where his feet kick, and a wake opening out behind him
+      vec2 o = g.xz - uAt.xy; float cs = cos(uAt.z), sn = sin(uAt.z);
+      vec2 l = vec2(o.x * cs + o.y * sn, o.y * cs - o.x * sn) / uAt.w;
+      float back = -l.x - 0.25;
+      bool foam = uSwim > 0.5 && map(g) < 0.02 * uAt.w;
+      if (back > 0.0 && back < 1.5 && abs(abs(l.y) - (0.07 + back * 0.3)) < 0.035 && (1.0 - back / 1.5) * uSwim > dots()) foam = true;
+      if (back > -0.1 && back < 0.4 && abs(l.y) < 0.16 && hash2(floor(l * 24.0) + floor(uRing.x / TAU * 160.0)) < 0.55 * uSwim) foam = true;
+      if (foam) col = CREAM;
+    }
+    if (close < 0.036 && uShow > 0.5) col = MOUND;   // a dark line round him, so he stands out from any pattern
+  }
+  // Lights that lift off the river and drift up into the dark, each a pixel or so, coming and going
+  if (uGlow > 0.0) for (int i = 0; i < 22; i++) {
+    float fi = float(i), h1 = hash2(vec2(fi, 1.0)), h2 = hash2(vec2(fi, 2.0)), h3 = hash2(vec2(fi, 3.0));
+    float rise = fract(uRing.x / TAU * (1.0 + floor(h3 * 3.0)) + h1), al = mix(-0.4, 3.6, h2);
+    vec2 base = uLine.xy + uLine.zw * al + vec2(-uLine.w, uLine.z) * (h3 - 0.5) * 1.5 * bankAt(al);
+    // What they are goes by the scene: cold sparks over the stars, petals coming down over the lotus, dim embers otherwise
+    bool starry = abs(uPhase.x - 5.0) < 0.5, petals = abs(uPhase.x - 3.0) < 0.5;
+    vec3 d = vec3(base.x + 0.08 * sin(rise * 9.0 + fi), (petals ? 1.0 - rise : rise) * 0.9, base.y) - ro;
+    if (length(d - rd * dot(d, rd)) < 0.014 && sin(rise * 3.1416) * uGlow * 0.6 > dots())
+      col = starry ? vec3(0.55, 0.66, 0.85) : petals ? vec3(0.72, 0.46, 0.56) : vec3(0.6, 0.53, 0.36);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.2 }, uRim: { value: 1 }, uShow: { value: 1 }, uRoll: { value: 0 }, uColour: { value: 0 }, uHue: { value: 0 }, uGlow: { value: 0 }, uSwim: { value: 0 }, uWidth: { value: 1 }, uDrop: { value: 0 },
+  uJ: { value: Array.from({ length: 11 }, () => new THREE.Vector2()) },
+  uAt: { value: new THREE.Vector4(0, 0, 0, 1) }, uDive: { value: new THREE.Vector2() }, uCen: { value: new THREE.Vector2() }, uCenPrev: { value: new THREE.Vector2() }, uMan: { value: new THREE.Color() },
+  uLine: { value: new THREE.Vector4() }, uPhase: { value: V(-1, 0, -1) }, uTrail: { value: Array.from({ length: 10 }, () => new THREE.Vector2()) }, uStep: { value: Array.from({ length: 4 }, () => V()) }, uRing: { value: new THREE.Vector2() },
+  uNavy: { value: new THREE.Color() }, uGold: { value: new THREE.Color() }, uMagenta: { value: new THREE.Color() }, uPink: { value: new THREE.Color() },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.45, 0) }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.2, 1.2 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const YAW = 0.3, PITCH = 0.42;   // the view as it is before any sway or dragging
+const view = { yaw: 0, pitch: PITCH };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// The spot on the water under a place on the screen, given as fractions from the left and from the bottom
+const _f = V(), _r = V(), _u = V(), _o = V();
+function onWater(fx, fy) {
+  _f.set(-Math.sin(YAW) * Math.cos(PITCH), -Math.sin(PITCH), -Math.cos(YAW) * Math.cos(PITCH)); _r.set(Math.cos(YAW), 0, -Math.sin(YAW)); _u.crossVectors(_r, _f);
+  const span = uniforms.uSpan.value;
+  _o.copy(uniforms.uTarget.value).addScaledVector(_r, (fx * 2 - 1) * span * cols / rows).addScaledVector(_u, (fy * 2 - 1) * span);
+  _o.addScaledVector(_f, -_o.y / _f.y);
+  return [_o.x, _o.z];
+}
+const mix2 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+
+const EASE = {
+  lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5,
+};
+// A track is a list of [when, pose, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i], k = EASE[how]((t - t0) / (t1 - t0));
+    return typeof a === 'number' ? a + (b - a) * k : a.map((v, j) => v + (b[j] - v) * k);
+  }
+  return track[track.length - 1][1];
+}
+
+// Poses, side on, as x and y for: hip, chest, head, knee, foot, elbow, hand
+const RUN    = [0, 0.27,  0.06, 0.42,  0.105, 0.53,  0.015, 0.14,  0.0, 0.03,  0.03, 0.3,  0.095, 0.31];   // leaning into it, elbows bent square
+const REACH  = [0, 0.26,  0, 0.42,  0, 0.53,  0, 0.14,  0, 0.02,  0, 0.52,  0, 0.64];
+const SWIM   = [0, 0.02,  0.16, 0.045,  0.27, 0.075,  -0.13, 0.01,  -0.27, 0.0,  0.27, 0.04,  0.38, 0.02];   // lying high in the water so he shows, hips a little low
+
+// Where things are on the screen, from the left and from the bottom: where he starts, and where the band of sea heads
+const START = [0.2, 0.3], END = [0.8, 0.74];
+const DIVE = 0.23;  // how far along that line he goes in
+
+// The parts of the story; drag their ends on the timeline to make one last longer
+const BEGIN = 1.6;   // the time on the story's clock that the loop starts at
+const S = sections({ run: 0.5, dive: 0.7, ripple: 0.35, circles: 0.54, rings: 0.54, marble: 0.54, harlequin: 0.54, lotus: 0.54, weave: 0.54,
+  stars: 0.54, chevron: 0.54, eyes: 0.54, tartan: 0.54, spiral: 0.54, black: 0.54 });
+const ORDER = [20, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];   // which pattern each of those is, in the shader's numbering
+const ENTRY = 2.6;    // when his hands break the surface
+const FIRST = 3.15;   // when the first pattern sets off
+const EACH = 0.54;     // how long until the next one follows
+const ARRIVE = 0.4;  // how much of that it spends arriving
+const BLACK = FIRST + 11 * EACH;   // when the black sets off
+// He sprints in from off the picture along the line he will swim and dives without breaking stride: how far he has come, and how much he is still running
+const WALK = [[BEGIN, 0], [2.1, 1, 'lin']], STEPS = [[BEGIN, 1], [1.9, 1], [2.06, 0.6], [2.14, 0]];
+const WALK_FROM = -0.2;    // where he sets out from, along that line: a couple of strides back, in the dark
+const FLIGHT = 0.6;        // how long the leap carries him forward
+
+// Which pose he is in, how far he has turned over, and how high he is off the water
+const LUNGE  = [0.02, 0.2,  0.13, 0.32,  0.2, 0.39,  0.1, 0.11,  0.05, 0.03,  -0.05, 0.3,  -0.14, 0.27];   // the last stride: sunk low, thrown forward, arms swept back
+const POSE = [[0, RUN], [1.9, RUN], [2.06, LUNGE, 'out'], [2.16, REACH, 'snap'], [2.85, REACH], [2.95, SWIM]];
+// A clean dive: he springs up and forward, tips right over at the top, and goes in almost straight down, hands first, the rest of him following through the same hole
+const TURN = [[0, 0], [2.06, 0], [2.16, Math.PI * 0.36, 'out'], [2.32, Math.PI * 0.55, 'lin'], [2.6, Math.PI * 0.7, 'lin'], [2.85, Math.PI * 0.7], [2.9, 0]];   // a long low racing dive: thrown forward, stretched out, in at a shallow slant
+// He comes up to swim as the sea shows, and slips under for good as the last of it closes in on him
+const LIFT = [[0, 0], [1.95, 0], [2.1, 0.03, 'in'], [2.28, 0.2, 'out'], [2.75, -0.6, 'in'], [2.95, -0.6], [3.25, 0, 'out'],
+  [BLACK + ARRIVE - 0.2, 0], [BLACK + ARRIVE, -0.75, 'in']];
+const STROKE = [[0, 0], [2.85, 0], [2.95, 1]];     // how much he is swimming
+const SWIM_FROM = 2.8, SWIM_TO = BLACK;          // when he sets off under the water, and when he reaches the far end
+const FAR = 1.1;                           // how far along the line he gets
+// He comes out of the dark as he walks in, and is gone once he has slipped under
+const SHOW = [[BEGIN, 0], [BEGIN + 0.12, 1, 'lin'], [BLACK + ARRIVE - 0.03, 1], [BLACK + ARRIVE, 0]];
+
+const P = params({
+  size: [0.7, 0.4, 1.2],     // how big the man is
+  man: '#f2c23e',            // what colour he is
+  rim: [1, 0.3, 1.6],        // how much light catches the man
+  width: [1, 0.4, 2.5],      // how wide the band of sea is
+  ripples: [2, 0.5, 4],      // how close together the rings are
+  colour: [0, 0, 1],         // how much of its colour the sea keeps; at 0 it is black and white but for his trail
+  hue: { value: 0, min: -180, max: 180, kind: 'dial', group: 'sea' },   // turns the sea's green round the colour wheel
+  navy: { value: '#18264f', group: 'sea' },
+  gold: { value: '#c8a352', group: 'sea' },
+  magenta: { value: '#9a4a7c', group: 'sea' },
+  pink: { value: '#d8a3b5', group: 'sea' },
+});
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  // The story runs on written time; the sway, his breathing and the patterns' own movement go once round the real loop so they never freeze
+  const t = S.written(now) + BEGIN, round = S.round(now) * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = YAW + 0.15 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // Where he is: at the start, through the air to the dive, then slowly up the line
+  const from = onWater(START[0], START[1]), to = onWater(END[0], END[1]), dive = mix2(from, to, DIVE);
+  const lineA = Math.atan2(to[1] - from[1], to[0] - from[0]);
+  // He gets smaller the further up the line he is, by as much as the river narrows, so both read as going away
+  const sizeAt = p => {
+    const x = clamp(((p[0] - from[0]) * Math.cos(lineA) + (p[1] - from[1]) * Math.sin(lineA) + 1) / 5.2, 0, 1);
+    return P.size * (1.3 - 0.85 * x * x * (3 - 2 * x)) / 1.1;
+  };
+  const end = mix2(from, to, FAR);
+  // He does not swim straight: he wanders off the line and back, surges and slackens, and his body snakes with each stroke
+  const swimAt = u => {
+    const e = Math.sin(Math.PI * clamp(u, 0, 1)), p = mix2(dive, end, clamp(u + 0.012 * e * Math.sin(u * 31), 0, 1));
+    const side = e * (0.1 * Math.sin(u * 8) + 0.03 * Math.sin(u * 19 + 1));
+    return [p[0] - Math.sin(lineA) * side, p[1] + Math.cos(lineA) * side];
+  };
+  const wob = 0.8 * Math.sin(round * 3) + 0.4 * Math.sin(round * 7);   // what keeps his stroke from being even
+  const walked = key(WALK, t), steps = key(STEPS, t);
+  // His legs turn over once for each stride's worth of ground, so his feet do not slide
+  const gait = walked * Math.hypot(to[0] - from[0], to[1] - from[1]) * -WALK_FROM / (1.07 * P.size) * Math.PI * 2;
+  let at = mix2(mix2(mix2(from, to, WALK_FROM), from, walked), dive, clamp((t - 2.1) / FLIGHT, 0, 1)), face = lineA;   // the leap carries him on at the speed he was running
+  if (t >= SWIM_FROM) {
+    const u = (t - SWIM_FROM) / (SWIM_TO - SWIM_FROM), v = Math.min(u, 0.985), a0 = swimAt(v), a1 = swimAt(v + 0.01);
+    const off = Math.atan2(a1[1] - a0[1], a1[0] - a0[0]) - lineA;   // he turns only half way into each swerve, so the trail does not swing about
+    at = swimAt(u); face = lineA + 0.5 * Math.atan2(Math.sin(off), Math.cos(off)) + 0.12 * Math.sin(round * 9 + wob) * key(STROKE, t);
+    for (let i = 0; i < 10; i++) { const p = swimAt(Math.max(0, u - (i + 0.3) * 0.062)); U.uTrail.value[i].set(p[0], p[1]); }   // the water he has just come through
+  }
+  U.uMan.value.set(P.man).convertLinearToSRGB();
+  U.uAt.value.set(at[0], at[1], face + steps * 0.2 * Math.sin(gait), sizeAt(at));   // and his shoulders turn with each stride
+  // Where his feet came down on the run in, one for each half turn of his legs, and the last where he took off
+  const run0 = mix2(from, to, WALK_FROM), falls = gait / Math.max(walked, 1e-4) / Math.PI;
+  for (let m = 0; m < 4; m++) {
+    const k = m < 3 ? m / falls : 1, p = mix2(run0, from, Math.min(k, 1)), fwd = (m < 3 ? 0.16 : 0.05) * sizeAt(p);
+    U.uStep.value[m].set(p[0] + Math.cos(lineA) * fwd, p[1] + Math.sin(lineA) * fwd, k <= 1 ? t - (BEGIN + (2.1 - BEGIN) * k) : -1);
+  }
+  // The splash, and everything that spreads from it, is where his hands meet the water: ahead of his hips by his reach, at the slant he is at
+  const hips = mix2(from, dive, clamp((ENTRY - 2.1) / FLIGHT, 0, 1)), reach = 0.38 * Math.sin(key(TURN, ENTRY)) * sizeAt(hips);
+  U.uDive.value.set(hips[0] + Math.cos(lineA) * reach, hips[1] + Math.sin(lineA) * reach);
+  U.uLine.value.set(from[0], from[1], Math.cos(lineA), Math.sin(lineA));
+
+  // The man: his pose, with each arm and leg given its own place, turned about the hip and lifted
+  const pose = key(POSE, t), turn = key(TURN, t), lift = key(LIFT, t) + key(STROKE, t) * 0.018 * Math.sin(round * 9) + steps * 0.035 * Math.abs(Math.sin(gait + 0.9)), breath = 0.006 * Math.sin(round * 6);
+  const stroke = key(STROKE, t), limbs = [];
+  let roll = 0;
+  for (let k = 0; k < 2; k++) {
+    // A hard front crawl, nine strokes a loop. Each hand goes round the shoulder: it glides out in front, pulls back under the water,
+    // and comes forward over it with the elbow high, the other arm half a turn behind. The feet flutter, three beats to an arm.
+    const a = round * 9 + wob + k * Math.PI, th = -(a - 0.5 * Math.sin(a)), up = Math.sin(th);
+    const kick = Math.sin(round * 27 + k * Math.PI) * (1.2 + 0.4 * Math.sin(round * 5 + k)), amp = 1 + 0.2 * Math.sin(round * 4 + k * 2);   // no two strokes quite alike
+    const ax = pose[2] + 0.22 * amp * Math.cos(th), ay = pose[3] - 0.02 + 0.13 * amp * up;
+    const ex = (pose[2] + ax) / 2 - 0.02 * Math.max(0, up), ey = (pose[3] + ay) / 2 + 0.07 * Math.max(0, up) - 0.03 * Math.max(0, -up);
+    // Walking: each foot swings forward off the ground as the other pushes back, and the arms go against the legs
+    // Each leg in turn: a short hard push with the foot planted, going back under him as fast as he goes forward, then a long
+    // swing through the air, heel flicking up behind and the knee driving forward. Between pushes both feet are off the ground.
+    const ph = ((gait / (Math.PI * 2) + k * 0.5) % 1 + 1) % 1, planted = ph < 0.3, s = planted ? ph / 0.3 : (ph - 0.3) / 0.7, e = s * s * (3 - 2 * s), arc = Math.sin(Math.PI * s);
+    const fdx = steps * (planted ? 0.16 - 0.32 * s : -0.16 + 0.32 * e), fdy = steps * (planted ? 0 : 0.16 * arc * (1 - 0.5 * s));
+    const kdx = steps * (planted ? 0.08 - 0.12 * s : -0.04 + 0.12 * e + 0.07 * arc), kdy = steps * (planted ? -0.01 * arc : 0.08 * arc);
+    const sw = steps * Math.cos(Math.PI * 2 * ph);   // the arm on this side goes back as the leg comes forward
+    // A sprint: knees high, heels kicking up behind, and the arms pumping hard against the legs with the elbows kept square
+    limbs.push(pose[6] + kdx, pose[7] + stroke * 0.025 * kick + kdy, pose[8] + fdx, pose[9] + stroke * 0.07 * kick + fdy,
+      pose[10] + (ex - pose[10]) * stroke - 0.07 * sw, pose[11] + (ey - pose[11]) * stroke, pose[12] + (ax - pose[12]) * stroke - 0.1 * sw, pose[13] + (ay - pose[13]) * stroke - 0.07 * sw);
+    if (k === 0) roll = stroke * 0.35 * up;   // he rolls onto the shoulder of the arm that is under
+  }
+  // Running, his weight swings from one foot to the other
+  U.uRoll.value = roll + steps * 0.22 * Math.sin(gait); U.uSwim.value = stroke * clamp(1 + lift / 0.3, 0, 1);
+  const joints = [...pose.slice(0, 6), ...limbs];
+  const c = Math.cos(turn), sn = Math.sin(turn), hx = pose[0], hy = pose[1];
+  for (let i = 0; i < 11; i++) {
+    const dx = joints[i * 2] - hx + (i === 1 || i === 2 ? steps * 0.012 * i : 0), dy = joints[i * 2 + 1] - hy + (i === 1 || i === 2 ? breath : 0);
+    U.uJ.value[i].set(hx + dx * c + dy * sn, hy + lift - dx * sn + dy * c);
+  }
+  U.uColour.value = P.colour; U.uHue.value = P.hue * Math.PI / 180;
+  U.uGlow.value = key([[FIRST, 0], [FIRST + 0.6, 1, 'lin'], [BLACK, 1], [BLACK + 0.4, 0, 'lin']], t);   // the lights come up with the river and go out with it
+  U.uRim.value = P.rim; U.uShow.value = key(SHOW, t);
+
+  // The sea: which pattern is spreading from the dive now, and how far it has got; after the tenth comes the black
+  const phase = clamp(Math.floor((t - FIRST) / EACH), -1, 11);
+  U.uDrop.value = t - ENTRY;
+  // Every pattern spreads from where he went in, but for the spiral and the black after it, which centre on where he ends up
+  const centre = i => i >= 10 ? end : [U.uDive.value.x, U.uDive.value.y];
+  const c0 = centre(phase), c1 = centre(phase - 1);
+  U.uCen.value.set(c0[0], c0[1]); U.uCenPrev.value.set(c1[0], c1[1]);
+  const into = clamp((t - FIRST - phase * EACH) / ARRIVE, 0, 1);   // each arrival eases in and eases out, so one pattern slides into the next
+  U.uPhase.value.set(phase < 0 ? -1 : ORDER[phase], into * into * (3 - 2 * into), phase > 0 ? ORDER[phase - 1] : -1);
+  U.uRing.value.set(round, P.ripples); U.uWidth.value = P.width;
+  // Colours go to the screen as picked, not darkened
+  U.uNavy.value.set(P.navy).convertLinearToSRGB(); U.uGold.value.set(P.gold).convertLinearToSRGB();
+  U.uMagenta.value.set(P.magenta).convertLinearToSRGB(); U.uPink.value.set(P.pink).convertLinearToSRGB();
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

@@ -1,0 +1,239 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795360755608;window.__values={"float":1.6,"fold":2.8,"clock":2.6,"burst":2.6,"rings":7,"numbers":18,"laps":2,"shuffles":2,"trail":0.57,"glow":"#ff00a7","face":0.75,"hands":0.7,"minuteHand":0.389,"tiltX":-2.2875436272164063,"tiltZ":2.802690622234822,"wobble":0.6,"swings":3,"cycle":true};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Number rings</title>
+<style>
+  /* Layout: a dark page with one thing on it, drawn in chunky pixels. */
+  :root { --bg: #0a0b12; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="An eight second loop. Faint, ghostly numbers circle in rings on many tilted planes in the dark, flickering and changing at random as they go."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Every pixel asks each number nearby whether it lights it; the nearer and brighter one wins
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uGlow;
+uniform float uSpan, uTime, uRings, uPer, uLaps, uShuffles, uTrail, uHands, uSwell, uMinute;
+uniform float uFace[12];   // how flat each ring has folded, so they can go one after another
+uniform mat3 uTilt;   // which way the whole thing faces
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const float TAU = 6.2831853;
+
+// The digits, each a 3 by 5 grid of bits, top row in the highest bits
+const int FONT[10] = int[10](31599, 11415, 29671, 29647, 23497, 31183, 31215, 29330, 31727, 31695);
+const vec3 BG = vec3(0.04, 0.045, 0.07);
+
+float hash(float n) { return fract(sin(n * 127.1 + 0.37) * 43758.5453); }
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+// The thing: rings of numbers, each ring on its own tilted plane through the middle
+vec3 ringPoint(float r, float a) {
+  float turn = r / uRings * 3.14159 + hash(r) * 0.3, tilt = (hash(r + 9.0) - 0.5) * 1.3;
+  vec3 u = vec3(cos(turn), 0.0, -sin(turn));
+  vec3 v = normalize(vec3(sin(turn) * tilt, 1.0, cos(turn) * tilt));
+  // Towards a clock: every plane folds flat onto one face, the rings nested one inside another
+  float face = uFace[int(r)];
+  u = normalize(mix(u, vec3(1.0, 0.0, 0.0), face)); v = normalize(mix(v, vec3(0.0, 1.0, 0.0), face));
+  float rad = mix(0.62 + 0.28 * hash(r + 3.0), 0.92 - 0.5 * r / max(uRings - 1.0, 1.0), face);
+  return uTilt * (rad * uSwell * (cos(a) * u + sin(a) * v));
+}
+vec2 toScreen(vec3 P) { return vec2(dot(P, uRight), dot(P, uUp)) / (2.0 * uSpan / uRes.y) + uRes * 0.5; }
+// A clock hand, a faint line from the middle out to where it points
+float hand(vec2 px, float a, float len) {
+  vec2 c = toScreen(vec3(0.0)), e = toScreen(uTilt * vec3(sin(a), cos(a), 0.0) * len);
+  vec2 pa = px - c, ba = e - c; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return smoothstep(1.1, 0.5, length(pa - ba * h));
+}
+// How brightly one digit, standing at P, lights this pixel
+float glyphAt(vec2 px, vec3 P, int g, float strength) {
+  vec2 sc = vec2(dot(P, uRight), dot(P, uUp)) / (2.0 * uSpan / uRes.y) + uRes * 0.5;
+  float near = dot(P, -uFwd);   // towards you is positive
+  float c = near > 0.25 ? 2.0 : 1.0;
+  vec2 o = floor(sc - vec2(1.5, 2.5) * c + 0.5), l = floor((px - o) / c);
+  float b = strength * mix(0.3, 1.0, clamp(near * 0.7 + 0.5, 0.0, 1.0));
+  float halo = b * 0.22 * max(0.0, 1.0 - length(px - sc) / (4.5 * c));   // a faint haze round each one
+  if (l.x < 0.0 || l.x > 2.0 || l.y < 0.0 || l.y > 4.0) return halo;
+  int bit = int(l.y) * 3 + 2 - int(l.x);
+  return ((FONT[g] >> bit) & 1) == 1 ? b : halo;
+}
+
+// Beyond: only the dark, nothing to stand on
+vec3 landAt(vec2 s) { return BG; }
+
+void main() {
+  vec2 px = floor(gl_FragCoord.xy) + 0.5, s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0;
+  float pxSize = 2.0 * uSpan / uRes.y, tl = uTime;
+  float lit = 0.0;
+  for (int ri = 0; ri < 12; ri++) {
+    float r = float(ri); if (r >= uRings) break;
+    float dir = mod(r, 2.0) < 0.5 ? 1.0 : -1.0, spin = (1.0 + floor(hash(r + 5.0) * uLaps)) * dir;
+    for (int ji = 0; ji < 32; ji++) {
+      float j = float(ji); if (j >= uPer) break;
+      float id = r * 32.0 + j;
+      float a = TAU * (spin * tl + j / uPer);
+      vec3 P = ringPoint(r, a);
+      vec2 sc = vec2(dot(P, uRight), dot(P, uUp)) / pxSize + uRes * 0.5;
+      if (length(px - sc) > 14.0 + 30.0 * uTrail) continue;
+      // Which number it shows: it changes now and then, the same at the same moment every time
+      float epoch = mod(floor(tl * uShuffles + hash(id + 1.0) * uShuffles), uShuffles);
+      int g = int(hash(id * 7.0 + epoch * 13.0) * 10.0);
+      // A slow flicker, a whole number of times round the loop
+      float flick = 0.65 + 0.35 * sin(TAU * tl * (1.0 + floor(hash(id + 2.0) * 3.0)) + hash(id) * TAU);
+      lit = max(lit, glyphAt(px, P, g, flick));
+      // Fainter echoes left behind where it just was
+      for (int k = 1; k <= 3; k++) {
+        float e = float(k);
+        lit = max(lit, glyphAt(px, ringPoint(r, a - spin / abs(spin) * e * 0.09 * uTrail), g, flick * uTrail * (0.42 - 0.12 * e)));
+      }
+    }
+  }
+  // The hands: the hour hand once round the loop, the minute hand eight times
+  if (uHands > 0.0) lit = max(lit, uHands * max(hand(px, TAU * tl, 0.42), 0.7 * hand(px, TAU * tl * 8.0, uMinute)));
+  vec3 col = landAt(s);
+  float tone = stepped(lit, 4.0);
+  col = mix(col, uGlow, tone * tone * 0.9 + tone * 0.1);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.2 }, uGlow: { value: new THREE.Color() },
+  uTime: { value: 0 }, uFace: { value: new Float32Array(12) }, uSwell: { value: 1 }, uMinute: { value: 0.7 }, uHands: { value: 0 }, uTilt: { value: new THREE.Matrix3() }, uRings: { value: 7 }, uPer: { value: 14 }, uLaps: { value: 1 }, uShuffles: { value: 4 }, uTrail: { value: 0.6 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.2, 1.2 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.2 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, -0.9, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+// Floating rings fold flat into a clock, hold, then burst back out
+const S = sections({ float: 1.6, fold: 2.8, clock: 2.6, burst: 2.6 });
+const EASE = { io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, snap: x => 1 - (1 - x) ** 5, soft: x => x * x * (3 - 2 * x) };
+// A track is a list of [when, value, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i];
+    return a + (b - a) * EASE[how]((t - t0) / (t1 - t0));
+  }
+  return track[track.length - 1][1];
+}
+const P = params({
+  rings: { value: 7, min: 2, max: 12, step: 1 },      // how many planes of numbers
+  numbers: { value: 14, min: 4, max: 32, step: 1 },   // how many numbers on each ring
+  laps: { value: 1, min: 1, max: 3, step: 1 },        // fastest ring's times round each loop
+  shuffles: { value: 4, min: 1, max: 12, step: 1 },   // how often each number changes in a loop
+  trail: [0.6, 0, 1],                                 // how long the ghostly echoes behind them are
+  glow: '#bcd6ff',                                    // colour of the numbers
+  face: [0, 0, 1],                                    // how flat the planes fold into one clock face at the fold
+  hands: [0, 0, 1],                                   // how bright the clock hands are
+  minuteHand: [0.7, 0.2, 1.1],                        // how long the minute hand is
+  tiltX: { value: 0, min: -Math.PI, max: Math.PI, kind: 'dial' },   // tip the whole thing back and forth
+  tiltZ: { value: 0, min: -Math.PI, max: Math.PI, kind: 'dial' },   // and side to side
+  wobble: [0, 0, 1],                                  // how far the tilt swings round
+  swings: { value: 1, min: 1, max: 6, step: 1 },      // how many times it swings round each loop
+  cycle: false,                                       // colour goes round pink, magenta and red instead of glow
+});
+const tiltM = new THREE.Matrix4(), tiltE = new THREE.Euler();
+// The colours the cycle passes through, round and back to the first
+const HUES = ['#ff9ccf', '#f24bd8', '#ff4a5c'].map(c => new THREE.Color(c));
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  // Spinning, flicker and colour run on the real loop so they carry on through a held section; the fold runs on written time
+  const u = S.round(now), round = u * Math.PI * 2, w = S.written(now), U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + 0.25 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+
+  U.uTime.value = u;
+  U.uRings.value = Math.round(P.rings); U.uPer.value = Math.round(P.numbers);
+  U.uLaps.value = Math.round(P.laps); U.uShuffles.value = Math.round(P.shuffles); U.uTrail.value = P.trail;
+  U.uGlow.value.set(P.glow);
+  if (P.cycle) {
+    // Lingers on each colour, then slides to the next
+    const k = u * HUES.length, i = Math.floor(k), f = k - i, e = f * f * (3 - 2 * f);
+    U.uGlow.value.copy(HUES[i % HUES.length]).lerp(HUES[(i + 1) % HUES.length], e);
+  }
+  // The rings fold in one after another from the outside, and open again from the inside out
+  for (let r = 0; r < 12; r++) {
+    const o = r / Math.max(Math.round(P.rings) - 1, 1);
+    U.uFace.value[r] = key([[1.6 + 1.0 * o, 0], [3.4 + 1.0 * o, P.face, 'io'], [7.0 + 0.9 * (1 - o), P.face], [8.7 + 0.9 * (1 - o), 0, 'soft']], w);
+  }
+  // A slow breath outwards as it opens, settling back by the end
+  U.uSwell.value = 1 + 0.1 * Math.sin(Math.PI * clamp((w - 7.0) / 2.6, 0, 1));
+  U.uHands.value = P.hands; U.uMinute.value = P.minuteHand;
+  const sw = round * Math.round(P.swings);
+  const tx = P.tiltX + 0.45 * P.wobble * Math.sin(sw), tz = P.tiltZ + 0.45 * P.wobble * Math.cos(sw);
+  U.uTilt.value.setFromMatrix4(tiltM.makeRotationFromEuler(tiltE.set(tx, 0, tz, 'ZYX')));
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

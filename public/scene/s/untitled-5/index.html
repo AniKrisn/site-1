@@ -1,0 +1,287 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794739567676;window.__values={"flaps":5,"wingspan":1,"caw":1,"spikyness":2};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Crow</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A four second loop. A black crow hangs in the air over a white page, beating its wings with its legs dangling, and tips its head up to caw."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// The crow is not a mesh: every pixel walks a ray to a shape made of blended blobs and flat feathers
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uPos;
+uniform float uSpan, uPitch, uWing, uHead, uBeak, uLegs, uSpiky;
+uniform vec2 uFlap;   // how high the inner wing is raised, and how far the hand bends on from it
+
+// Black, and the few blue-greys the light is allowed to pull out of it
+const vec3 INK[5] = vec3[5](vec3(0.025, 0.025, 0.04), vec3(0.09, 0.09, 0.13), vec3(0.18, 0.19, 0.27), vec3(0.33, 0.35, 0.47), vec3(0.58, 0.6, 0.7));
+const vec3 FLOOR[3] = vec3[3](vec3(1.0), vec3(0.85, 0.86, 0.91), vec3(0.66, 0.67, 0.76));
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+const vec3 NECK = vec3(0.18, 0.06, 0.0);    // where the head tips back on the neck
+const vec3 EYE = vec3(0.31, 0.12, 0.075);
+const vec3 HINGE = vec3(0.33, 0.07, 0.0);   // where the lower beak drops from
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// From the world into the crow's own space, nose along +x, tipped up by its pitch
+vec3 toBird(vec3 p) { vec3 q = p - uPos; q.xy = rot(-uPitch) * q.xy; return q; }
+vec3 toHead(vec3 q) { vec3 h = q - NECK; h.xy = rot(-uHead) * h.xy; return h + NECK; }
+
+// One wing, folded so it does for both: an arm plate, then a hand that bends on at the wrist and splays into primaries
+float wing(vec3 q) {
+  vec3 w = (q - vec3(0.04, 0.07, 0.07)) / uWing;
+  w.yz = rot(uFlap.x) * w.yz;
+  float d = egg(vec3(w.x, w.y * 3.0, w.z), vec3(-0.06, 0.0, 0.15), vec3(0.13, 0.09, 0.19));
+  vec3 h = w - vec3(-0.02, 0.0, 0.29);
+  h.yz = rot(uFlap.y) * h.yz;
+  vec3 hs = vec3(h.x, h.y * 3.0, h.z);
+  d = smin(d, egg(hs, vec3(-0.07, 0.0, 0.08), vec3(0.11, 0.08, 0.13)), 0.05);
+  for (int i = 0; i < 4; i++) {
+    float f = float(i);
+    // spikier primaries are longer, finer at the tip and less melted together
+    vec3 tip = vec3(-0.07 * f, 0.0, 0.35 - 0.045 * f + 0.03 * (uSpiky - 1.0));
+    d = smin(d, rod(hs, vec3(-0.03 - 0.04 * f, 0.0, 0.06), tip, 0.04, max(0.004, 0.04 - 0.02 * uSpiky)), 0.012 + 0.03 * max(0.0, 1.0 - uSpiky));
+  }
+  return d / 3.0 * uWing;
+}
+float headPart(vec3 hq) {
+  float d = ball(hq, vec3(0.28, 0.09, 0.0), 0.095);
+  vec3 bz = vec3(hq.xy, hq.z * 1.3);
+  d = smin(d, rod(bz, vec3(0.32, 0.095, 0.0), vec3(0.475, 0.06, 0.0), 0.04, 0.006) / 1.3, 0.025);   // upper beak, with a hook
+  vec3 lq = hq - HINGE; lq.xy = rot(uBeak) * lq.xy; lq += HINGE;
+  d = min(d, rod(vec3(lq.xy, lq.z * 1.3), vec3(0.32, 0.06, 0.0), vec3(0.45, 0.05, 0.0), 0.032, 0.005) / 1.3); // lower beak
+  return d;
+}
+float bodyPart(vec3 q) {
+  vec3 m = vec3(q.xy, abs(q.z));
+  float d = egg(m, vec3(0.0, 0.0, 0.0), vec3(0.24, 0.13, 0.12));
+  d = smin(d, egg(m, vec3(-0.07, -0.04, 0.0), vec3(0.16, 0.11, 0.1)), 0.05);                           // belly
+  d = smin(d, rod(m, vec3(0.08, 0.02, 0.0), vec3(0.2, 0.07, 0.0), 0.1, 0.085), 0.05);                   // neck
+  vec3 t = vec3(m.x, m.y * 3.0, m.z);
+  d = smin(d, rod(t, vec3(-0.18, -0.03, 0.0), vec3(-0.5, -0.18, 0.0), 0.05, 0.085) / 3.0, 0.05);        // tail, flat and fanned
+  d = smin(d, egg(m, vec3(0.03, -0.11, 0.05), vec3(0.05, 0.06, 0.04)), 0.03);                           // thighs
+  vec3 ankle = vec3(0.04 + uLegs, -0.3, 0.05);
+  float legs = rod(m, vec3(0.03, -0.13, 0.05), ankle, 0.022, 0.016);
+  legs = min(legs, rod(m, ankle, ankle + vec3(0.06, -0.045, 0.0), 0.016, 0.012));                      // toes, curled
+  legs = min(legs, rod(m, ankle + vec3(0.06, -0.045, 0.0), ankle + vec3(0.075, -0.015, 0.0), 0.012, 0.01));
+  legs = min(legs, rod(m, ankle, ankle + vec3(-0.04, -0.035, 0.0), 0.015, 0.011));
+  d = min(d, legs);
+  return smin(d, wing(m), 0.04);
+}
+float map(vec3 p) {
+  vec3 q = toBird(p);
+  float d = smin(bodyPart(q), headPart(toHead(q)), 0.04);
+  return d - (noise(q * 24.0) - 0.5) * 0.012 * uSpiky;   // a little raggedness in the feathers
+}
+
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.01, -0.01);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the lamp reaches a point, soft at the edges
+float lampAt(vec3 ro) {
+  float res = 1.0, t = 0.03;
+  for (int i = 0; i < 28; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 8.0 * d / t);
+    t += clamp(d, 0.02, 0.14);
+    if (res < 0.01 || t > 2.2) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+vec3 inkTone(float t) { float x = clamp(t, 0.0, 1.0) * 4.0; return INK[min(int(x) + (fract(x) > dots() ? 1 : 0), 4)]; }
+vec3 floorTone(float t) { float x = clamp(t, 0.0, 1.0) * 2.0; return FLOOR[min(int(x) + (fract(x) > dots() ? 1 : 0), 2)]; }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0;
+  vec3 ro = uTarget + uRight * s.x * uSpan * uRes.x / uRes.y + uUp * s.y * uSpan - uFwd * 4.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+
+  // Only rays that pass near the crow need walking
+  vec3 oc = ro - (uPos + vec3(0.0, 0.1, 0.0)); float R = 0.25 + 0.75 * uWing;
+  float b = dot(oc, rd), c = dot(oc, oc) - R * R, disc = b * b - c;
+  float tFloor = -ro.y / rd.y, tHit = -1.0;
+  if (disc > 0.0) {
+    float t = -b - sqrt(disc), tEnd = min(-b + sqrt(disc), tFloor);
+    for (int i = 0; i < 110 && t < tEnd; i++) {
+      float d = map(ro + rd * t);
+      if (d < 0.002) { tHit = t; break; }
+      t += d * 0.8;
+    }
+  }
+
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p), q = toBird(p), hq = toHead(q);
+    vec3 e = vec3(hq.xy, abs(hq.z)) - EYE;
+    if (length(e) < 0.022) col = vec3(0.78, 0.8, 0.84);   // the glint of an eye
+    else {
+      float lamp = lampAt(p + n * 0.02);
+      float lit = max(dot(n, uLight), 0.0) * lamp;
+      float sheen = pow(1.0 - max(dot(n, -uFwd), 0.0), 2.5) * clamp(0.5 + dot(n, uLight), 0.0, 1.0);
+      float nook = clamp(0.5 + 0.5 * map(p + n * 0.05) / 0.05, 0.0, 1.0);
+      float tone = lit * 0.5 + sheen * 0.35 + (noise(q * 18.0) - 0.5) * 0.08;
+      col = inkTone(tone * nook);
+    }
+  } else if (tFloor > 0.0) {
+    // The page under it: only a shadow, fading to nothing
+    vec3 g = ro + rd * tFloor;
+    float near = 1.0 - smoothstep(0.8, 1.6, length(g.xz - uPos.xz));
+    if (near > 0.0) col = floorTone(near * (1.0 - lampAt(g + vec3(0.0, 0.012, 0.0))) * 0.55);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.2 }, uPos: { value: V(0, 0.8, 0) }, uFlap: { value: new THREE.Vector2() },
+  uPitch: { value: 0 }, uWing: { value: 1 }, uSpiky: { value: 1 }, uHead: { value: 0 }, uBeak: { value: 0 }, uLegs: { value: 0 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.65, 0) }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.2, 1.2 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.3 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+const EASE = {
+  lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5, fall: x => x ** 4, back: x => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2,
+};
+// A track is a list of [when, pose, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i], k = EASE[how]((t - t0) / (t1 - t0));
+    return a + (b - a) * k;
+  }
+  return track[track.length - 1][1];
+}
+const bump = (t, at, len) => t > at && t < at + len ? Math.sin((t - at) / len * Math.PI) : 0;
+
+// A wingbeat: a quick hard downstroke, then a slower lift back over the back
+const UP = 1.35, DOWN = -0.55, STROKE = 0.42;
+function beat(ph) {
+  ph = ((ph % 1) + 1) % 1;
+  return ph < STROKE ? UP + (DOWN - UP) * EASE.io(ph / STROKE) : DOWN + (UP - DOWN) * EASE.io((ph - STROKE) / (1 - STROKE));
+}
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 4;
+const P = params({
+  flaps: { value: 5, min: 3, max: 8, step: 1 },   // wingbeats per loop
+  wingspan: [1, 0.75, 1.3],                       // how long the wings are
+  caw: [1, 0, 1.6],                               // how wide the beak opens
+  spikyness: [1, 0, 2],                           // how pointed and ragged the feathers are
+});
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + 0.15 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // The wings: the hand trails the arm, so it lags a little behind each stroke
+  const ph = t / LOOP * Math.round(P.flaps), a = beat(ph);
+  U.uFlap.value.set(a, clamp(beat(ph - 0.09) - a, -0.9, 0.9));
+  U.uWing.value = P.wingspan;
+  U.uSpiky.value = P.spikyness;
+
+  // Each downstroke lifts the body; the whole bird drifts a little over the loop
+  const lift = Math.sin((ph - 0.05) * Math.PI * 2);
+  U.uPos.value.set(0.03 * Math.sin(round), 0.8 + 0.035 * lift + 0.02 * Math.sin(round * 2), 0);
+  U.uPitch.value = 0.26 + 0.04 * lift;
+  U.uLegs.value = 0.03 * Math.sin((ph - 0.3) * Math.PI * 2);
+
+  // The caw: a dip, a snap of the head up, two calls, and back
+  U.uHead.value = key([[0, 0], [1.85, 0], [2.12, -0.08], [2.28, 0.3, 'snap'], [2.95, 0.25], [3.45, 0]], t);
+  U.uBeak.value = 0.5 * P.caw * (bump(t, 2.24, 0.3) + bump(t, 2.6, 0.34));
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

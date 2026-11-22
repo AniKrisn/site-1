@@ -1,0 +1,291 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794602595253;window.__values={"sway":0.174,"sag":0.127,"clumps":0.924,"spread":1.392,"candy":"#c096b4"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Candy Clouds</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: a white page with one white, flat-bottomed cloud floating over it. It fills with colour, rains it out, and is white again. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A twelve second loop. A puffy, flat-bottomed white cloud floats over a white page in chunky pixels, its shadows faintly tinted pink, lemon, mint, sky blue and lilac. Colour seeps up into it from its underside until its belly is bright and it hangs lower and fatter. Then it rains: coloured drops fall and leave small coloured rings on the page that fade. Emptied, it rises, white again."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v)), lerp = (a, b, t) => a + (b - a) * t;
+const COUNT = 9, DROPS = 40;
+
+// The cloud is not a mesh: every pixel walks a ray to a shape made of balls that melt into one another
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uFlow;
+uniform float uSpan, uFill, uFloat;
+uniform vec4 uPuff[${COUNT}];   // where each puff is, and how big
+uniform vec4 uDrop[${DROPS}];   // a falling drop: where on the picture, whose colour, and whether it is falling at all
+uniform vec4 uRing[${DROPS}];   // where one landed on the page, how long ago, and whose colour; a negative age means not yet
+
+// One sweet per puff: pink, peach, lemon, lilac, mint, sky, sky, pink, lemon
+uniform vec3 CANDY[${COUNT}];
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const vec3 HEART = vec3(0.0, 0.85, 0.0);    // middle of everything, for the ball that bounds it
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+
+float map(vec3 p) {
+  float d = 1e3;
+  for (int i = 0; i < ${COUNT}; i++) d = smin(d, length(p - uPuff[i].xyz) - uPuff[i].w, 0.13);
+  // Puffs on the puffs, slowly churning
+  d -= (noise(p * 5.0 + uFlow) - 0.5) * 0.11 + (noise(p * 11.0 - uFlow) - 0.5) * 0.035;
+  // Sliced flat underneath, like any fair-weather cloud
+  return -smin(-d, p.y - uFloat, 0.07);
+}
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.016, -0.016);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 2.6) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends; shift it to get patterns out of step with each other
+float dots(vec2 shift) { ivec2 c = ivec2(gl_FragCoord.xy + shift) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps, vec2 shift) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots(shift) ? 1.0 : 0.0), steps) / steps; }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+
+  // Only rays that pass near the cloud need walking
+  vec3 oc = ro - HEART; float b = dot(oc, rd), c = dot(oc, oc) - 2.0 * 2.0, disc = b * b - c;
+  float tFloor = -ro.y / rd.y, tHit = -1.0;
+  if (disc > 0.0) {
+    float t = -b - sqrt(disc), tEnd = min(-b + sqrt(disc), tFloor);
+    for (int i = 0; i < 80 && t < tEnd; i++) {
+      float d = map(ro + rd * t);
+      if (d < 0.003) { tHit = t; break; }
+      t += d * 0.7;   // the churn is too bumpy to trust a full step
+    }
+  }
+
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    // Which sweet: the nearest puff's, speckling into the next nearest where they meet
+    float d1 = 1e3, d2 = 1e3; int i1 = 0, i2 = 0;
+    for (int i = 0; i < ${COUNT}; i++) {
+      float d = length(p - uPuff[i].xyz) - uPuff[i].w;
+      if (d < d1) { d2 = d1; i2 = i1; d1 = d; i1 = i; } else if (d < d2) { d2 = d; i2 = i; }
+    }
+    vec3 sweet = CANDY[clamp(0.5 - (d2 - d1) / 0.4, 0.0, 0.5) > dots(vec2(2.0, 1.0)) ? i2 : i1];
+    float nook = clamp(0.25 + 0.75 * map(p + n * 0.16) / 0.16, 0.0, 1.0);
+    float glow = clamp(dot(n, uLight) * 0.6 + 0.4, 0.0, 1.0) * (0.45 + 0.55 * lightAt(p + n * 0.03));
+    // White on a white page: its edge is drawn by a little shade where the surface turns away from you
+    float edge = pow(1.0 - max(dot(n, -uFwd), 0.0), 2.0);
+    float shade = 1.0 - (0.04 + 0.96 * pow(glow, 1.3)) * nook * (1.0 - 0.55 * edge);
+    // The cloud is white. Colour is only in its shadows, and in whatever it is carrying, which sits in its belly.
+    float belly = smoothstep(uFloat + 0.62, uFloat + 0.02, p.y) * uFill;
+    float tint = stepped(shade * (0.5 + 0.2 * uFill) + belly * 0.62, 6.0, vec2(0.0));
+    col = mix(vec3(1.0), sweet, tint) * mix(vec3(1.0), vec3(0.86, 0.8, 0.96), stepped(shade * shade * 0.9, 3.0, vec2(1.0, 2.0)));
+  } else if (tFloor > 0.0) {
+    // The page: shadows, each taking a little colour from the puff that throws it, and the rings the rain leaves
+    vec3 g = ro + rd * tFloor;
+    float dim = 1.0 - lightAt(g + vec3(0.0, 0.02, 0.0));
+    if (dim > 0.0) {
+      float best = 1e3; int who = 0;
+      for (int i = 0; i < ${COUNT}; i++) {
+        vec3 to = uPuff[i].xyz - g; float off = length(to - uLight * dot(to, uLight)) - uPuff[i].w;
+        if (off < best) { best = off; who = i; }
+      }
+      col = mix(vec3(1.0), CANDY[who] * vec3(0.86, 0.8, 0.95), stepped(dim * 0.85, 2.0, vec2(0.0)) * (0.3 + 0.2 * uFill));
+    }
+    for (int i = 0; i < ${DROPS}; i++) {
+      vec4 r = uRing[i];
+      if (r.z < 0.0) continue;
+      float wide = 0.03 + 0.1 * r.z, off = length(g.xz - r.xy);
+      // A drop spreads into a ring and thins away
+      if (off < wide && off > wide - 0.045 && (1.0 - r.z) * 0.9 > dots(vec2(3.0, 0.0))) col = mix(vec3(1.0), CANDY[int(r.w)], 0.7);
+    }
+    // Rain, drawn straight onto the picture, so a drop is never too thin to see; the cloud itself hides the ones behind it
+    for (int i = 0; i < ${DROPS}; i++) {
+      vec4 d = uDrop[i];
+      vec2 q = floor(gl_FragCoord.xy) - floor(d.xy);
+      if (d.w > 0.5 && q.x == 0.0 && q.y >= 0.0 && q.y < 3.0) col = CANDY[int(d.z)] * (q.y < 1.0 ? 0.9 : 1.0);
+    }
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), fours = n => Array.from({ length: n }, () => new THREE.Vector4(0, 0, -1, 0));
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.55 }, uFill: { value: 0 }, uFloat: { value: 0.5 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.68, 0) }, uLight: { value: V() }, uFlow: { value: V() },
+  uPuff: { value: fours(COUNT) }, CANDY: { value: Array.from({ length: COUNT }, () => V()) }, uDrop: { value: fours(DROPS) }, uRing: { value: fours(DROPS) },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  // Tall windows are fitted by width, so the whole cloud stays in
+  uniforms.uSpan.value = Math.max(1.55, 1.6 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.34 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 12;
+const FILL = [0.6, 5.0], RAIN = [5.0, 9.2];   // when it takes colour on, and when it lets it go
+const FALL = 0.42, SHOWER = 1.4;              // how long a drop is in the air, and how often each place under the cloud lets one go
+// Each puff: where it rests and how big it is
+const PUFFS = [
+  [-0.42, 0.82, 0.05, 0.36], [0.0, 0.98, -0.05, 0.44], [0.42, 0.84, 0.08, 0.36], [-0.15, 0.78, 0.26, 0.3], [0.2, 0.76, -0.28, 0.32],
+  [0.05, 1.22, 0.02, 0.26], [-0.74, 0.73, 0.08, 0.27], [0.77, 0.74, -0.08, 0.28], [0.06, 0.74, 0.44, 0.25],
+];
+const smooth = x => x * x * (3 - 2 * x), over = (t, a, b) => smooth(clamp((t - a) / (b - a), 0, 1));
+const chance = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+// Each drop belongs to a puff, falls from a fixed spot under it, and keeps its own time
+const RAINERS = Array.from({ length: DROPS }, (_, j) => {
+  const puff = j % COUNT, [x, , z, size] = PUFFS[puff], turn = chance(j) * Math.PI * 2, out = Math.sqrt(chance(j + 50)) * size * 0.8;
+  return { puff, x: Math.cos(turn) * out, z: Math.sin(turn) * out, late: chance(j + 100) * SHOWER };
+});
+const spot = V(), tmp = V();
+
+// Knobs the host can turn while it plays
+const P = params({
+  sway: [0.18, 0, 0.6],   // how far the view swings round it
+  sag: [0.07, 0, 0.2],    // how much lower it hangs when full
+  clumps: [1, 0.6, 1.5],  // how big its big puffs are
+  spread: [1, 0.6, 1.5],  // how far apart its big puffs sit
+  candy: { value: '#ff80b8', options: ['#ff80b8', '#ff9ecf', '#ff7a6b', '#7fe0c0', '#a77bff', '#5ab8ff'] },   // which bag of sweets it is tinted with
+});
+// Each swatch is a whole bag of six tones that go together: pink, peach, lemon, lilac, mint, sky slots
+const BAGS = {
+  '#ff80b8': ['#ff80b8', '#ffa370', '#ffd952', '#b88fff', '#66e0ad', '#66b3ff'],   // mixed candy
+  '#ff9ecf': ['#ff9ecf', '#ffb3d9', '#9fd8ff', '#c8a8ff', '#8fc8ff', '#6fb0ff'],   // cotton candy
+  '#ff7a6b': ['#ff7a6b', '#ffa04d', '#ffd23f', '#ff6fa8', '#a8e05a', '#ffb88a'],   // sherbet
+  '#7fe0c0': ['#7fe0c0', '#b5f0a0', '#fff07a', '#b88fff', '#5fd0b0', '#8fb8ff'],   // mint
+  '#a77bff': ['#a77bff', '#ff8fd0', '#ffe066', '#8a6cff', '#c0f070', '#7f9cff'],   // grape and lemon
+  '#5ab8ff': ['#5ab8ff', '#7fe8e0', '#d8f560', '#9f8fff', '#6fe090', '#4f8fff'],   // blue raspberry
+};
+// Which slot each puff takes
+const SLOTS = [0, 1, 2, 3, 4, 5, 5, 0, 2];
+const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+const hue = ([r, g, b]) => Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b);
+// A colour off the swatches: the mixed bag turned round the colour wheel to start from it
+function bagFor(hex) {
+  if (BAGS[hex]) return BAGS[hex].map(rgb);
+  const turn = hue(rgb(hex)) - hue(rgb('#ff80b8')), c = Math.cos(turn), s = Math.sin(turn) / Math.sqrt(3), k = (1 - c) / 3;
+  return BAGS['#ff80b8'].map(rgb).map(([r, g, b]) => {
+    const v = [c * r + (k - s) * g + (k + s) * b, (k + s) * r + c * g + (k - s) * b, (k - s) * r + (k + s) * g + c * b].map(x => Math.max(x, 0));
+    // Kept sweet: as bright as candy, and never darker than a pastel
+    const top = Math.max(...v, 0.01), low = Math.min(...v) / top, lift = Math.max(0, (0.32 - low) / (1 - low));
+    return v.map(x => lerp(x / top, 1, lift));
+  });
+}
+
+function frame(now, dt) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms, span = U.uSpan.value;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + P.sway * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  const up = U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // How full it is: it takes colour on slowly and gives it up as rain. Full, it is fatter and hangs lower.
+  const fill = over(t, ...FILL) * (1 - over(t, ...RAIN));
+  const sag = -P.sag * fill + 0.015 * Math.sin(round * 2), under = 0.5 + sag;
+  U.uFill.value = fill; U.uFloat.value = under;
+  const bag = bagFor(P.candy.toLowerCase());
+  SLOTS.forEach((slot, i) => U.CANDY.value[i].set(...bag[slot]));
+  PUFFS.forEach(([x, y, z, size], i) => U.uPuff.value[i].set(x * P.spread, y + sag, z * P.spread, size * P.clumps * (0.94 + 0.12 * fill + 0.03 * Math.sin(round * 3 + i * 1.9))));
+  // The churn goes round in a circle, so it too comes back to where it began
+  U.uFlow.value.set(0.6 * Math.cos(round), 0.3 * Math.sin(round), 0.6 * Math.sin(round));
+
+  // Rain: each spot lets a drop go three times over; a drop falls faster and faster, and where it lands a ring spreads and fades
+  RAINERS.forEach(({ puff, x: dx, z: dz, late }, j) => {
+    const x = PUFFS[puff][0] * P.spread + dx * P.clumps, z = PUFFS[puff][2] * P.spread + dz * P.clumps;
+    const since = t - RAIN[0] - late, turn = Math.floor(since / SHOWER), age = since - turn * SHOWER;
+    const raining = since >= 0 && turn < 3, drop = U.uDrop.value[j], ring = U.uRing.value[j];
+    drop.w = 0; ring.z = -1;
+    if (!raining) return;
+    if (age < FALL) {
+      tmp.copy(spot.set(x, under * (1 - (age / FALL) ** 2), z)).sub(U.uTarget.value);
+      drop.set((tmp.dot(right) / (span * cols / rows) * 0.5 + 0.5) * cols, (tmp.dot(up) / span * 0.5 + 0.5) * rows, puff, 1);
+    } else ring.set(x, z, (age - FALL) / (SHOWER - FALL), puff);
+  });
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

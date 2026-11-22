@@ -55,6 +55,14 @@ const projects: ProjectItem[] = [
     mobileHref: "/cache/",
   },
   {
+    title: "Scene",
+    thumb: "/thumbs/scene.jpg",
+    slug: "/scene/",
+    // read-only and wants a wide screen, but it loads anywhere, so the
+    // phone gets the same page rather than a missing entry
+    mobileHref: "/scene/",
+  },
+  {
     title: "(Educative) contraptions",
     thumb: "/thumbs/contraptions.jpg",
     // outbound: its own Worker, see the own-deployment note in CLAUDE.md

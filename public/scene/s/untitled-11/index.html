@@ -1,0 +1,540 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795046471919;window.__values={"silence":1,"countOff":2,"build":4,"eruption":1,"reign":2,"collapse":1.5,"brass":"#db8984","steam":1.14,"bounce":1.77,"tremor":1.36,"zoom":1.6675,"ground":"#33202b","stands":"#b5ada0"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>The summoning</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A four second loop. A brass and copper drum kit, set up in an arc as a drummer would have it: kick, snare, two rack toms, two floor toms, hi-hat, ride and two crashes. Two floating drumsticks play a busy two-bar beat that ends in a fill round the toms. A small stack puffs a little steam."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uBrass;
+uniform vec3 uCym[3];                // which way the ride and the two crashes face as they rock
+uniform vec3 uStick[4];              // each drumstick: its butt, then its tip
+uniform float uSpan, uGear, uHat, uBounce, uSpin;
+uniform float uHit[6];               // kick, snare, high tom, mid tom, two floor toms: how lately struck
+uniform vec4 uPuff[2];               // steam: where each puff is, and how big
+uniform vec2 uRing[10];              // tremors: how far out each ring has got, and how strong it still is
+uniform float uTremor;
+uniform vec3 uGround, uStands;
+uniform float uWake, uGlow, uFury;   // how awake the place is, how bright the pool of light, how far the frenzy has gone
+uniform float uCity;   // how much of the city behind has risen
+const float WOOD = 9.0;
+const vec3 WOOD_C = vec3(0.92, 0.68, 0.42);
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+// What things are made of
+const float BRASS = 1.0, HEAD = 2.0, COPPER = 3.0, IRON = 4.0, CYMBAL = 5.0, STEAM = 6.0, FRONT = 7.0, GAUGE = 8.0;
+const vec3 CREAM = vec3(0.97, 0.91, 0.78), COPPER_C = vec3(0.80, 0.43, 0.25), IRON_C = vec3(0.27, 0.25, 0.30), CYMBAL_C = vec3(0.96, 0.80, 0.38);
+
+// Where the pieces stand: an arc round a drummer sitting behind the kick
+const vec3 KICK = vec3(0.0, 0.37, 0.05), SNARE = vec3(0.42, 0.62, -0.5), TOM1 = vec3(0.25, 0.96, 0.0), TOM2 = vec3(-0.25, 0.96, 0.0);
+const vec3 FLOOR1 = vec3(-0.62, 0.42, -0.4), FLOOR2 = vec3(-1.05, 0.44, -0.78);
+const vec3 HAT = vec3(0.9, 0.9, -0.45), RIDE = vec3(-0.9, 1.2, -0.3), CRASH1 = vec3(0.6, 1.45, -0.3), CRASH2 = vec3(-0.5, 1.5, -0.3);
+const vec3 STACK = vec3(0.0, 1.14, -0.12), DIAL = vec3(-0.55, 0.44, -0.2), GOV = vec3(-1.2, 0.74, -0.15);
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float rod(vec3 p, vec3 a, vec3 b, float r) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+float rod2(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+// Keep whichever part is nearest, with what it is made of and two numbers for painting it
+void take(inout vec4 best, float d, float mat, vec2 uv) { if (d < best.x) best = vec4(d, mat, uv); }
+
+// One drum: a brass shell, a skin on each end and a copper hoop round each. front marks the kick, whose skin is painted
+void drum(inout vec4 best, vec3 p, vec3 c, vec3 a, float r, float h, float hit, bool front) {
+  a = normalize(a);
+  c -= a * 0.03 * uBounce * hit;   // it gives a little when struck
+  vec3 q = p - c; float y = dot(q, a), rad = length(q - a * y);
+  vec3 u = normalize(cross(a, vec3(1.0, 0.0, 0.0))), v = cross(a, u);
+  vec2 w = vec2(rad - r, abs(y) - h);
+  float shell = min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+  if (w.y > w.x) take(best, shell, front ? FRONT : HEAD, front ? vec2(-dot(q, v), dot(q, u)) : vec2(hit, 0.0));
+  else take(best, shell, BRASS, vec2(atan(dot(q, u), dot(q, v)), y / h));
+  take(best, length(vec2(rad - r - 0.005, abs(y) - h)) - 0.024, COPPER, vec2(0.0));
+}
+// A cymbal: a thin dish with a bell in the middle. cone is how much its edge droops (or rises, if negative)
+float cymbal(vec3 p, vec3 c, vec3 a, float r, float cone) {
+  vec3 q = p - c; float y = dot(q, a), rad = length(q - a * y);
+  return min(max(abs(y + cone * rad) - 0.012, rad - r) * 0.85, length(q) - 0.04);
+}
+// A stand: a post on three splayed feet
+float tripod(vec3 p, vec3 base, float top) {
+  float d = rod(p, base, base + vec3(0.0, top, 0.0), 0.018);
+  for (int i = 0; i < 3; i++) {
+    float an = float(i) * 2.094 + 0.5;
+    d = min(d, rod(p, base + vec3(0.0, 0.22, 0.0), base + vec3(cos(an), 0.0, sin(an)) * 0.2, 0.014));
+  }
+  return d;
+}
+// The three legs a floor tom stands on
+float legs(vec3 p, vec3 c, float r) {
+  float d = 1e3;
+  for (int i = 0; i < 3; i++) {
+    float an = float(i) * 2.094 + 0.5; vec3 o = vec3(cos(an), 0.0, sin(an));
+    d = min(d, rod(p, c + o * (r + 0.03), vec3(c.x, 0.0, c.z) + o * (r + 0.09), 0.016));
+  }
+  return d;
+}
+
+// The thing: distance, what it is made of, and two numbers for painting
+vec4 scene(vec3 p) {
+  vec4 best = vec4(1e3, 0.0, 0.0, 0.0);
+  drum(best, p, KICK, vec3(0.0, 0.0, 1.0), 0.34, 0.2, uHit[0], true);
+  drum(best, p, SNARE, vec3(0.0, 1.0, -0.05), 0.19, 0.065, uHit[1], false);
+  drum(best, p, TOM1, vec3(0.06, 1.0, -0.08), 0.15, 0.1, uHit[2], false);
+  drum(best, p, TOM2, vec3(-0.06, 1.0, -0.08), 0.16, 0.1, uHit[3], false);
+  drum(best, p, FLOOR1, vec3(0.0, 1.0, 0.0), 0.21, 0.2, uHit[4], false);
+  drum(best, p, FLOOR2, vec3(0.0, 1.0, 0.0), 0.24, 0.21, uHit[5], false);
+
+  // Ironwork: stands, the floor toms' legs, the kick's spurs, and the shafts of the sticks
+  float iron = min(tripod(p, vec3(SNARE.x, 0.0, SNARE.z), 0.56), tripod(p, vec3(HAT.x, 0.0, HAT.z), 1.02));
+  iron = min(iron, min(tripod(p, vec3(0.75, 0.0, -0.75), 1.2), rod(p, vec3(0.75, 1.2, -0.75), CRASH1, 0.018)));
+  iron = min(iron, min(tripod(p, vec3(-0.45, 0.0, -0.8), 1.25), rod(p, vec3(-0.45, 1.25, -0.8), CRASH2, 0.018)));
+  iron = min(iron, min(tripod(p, vec3(GOV.x, 0.0, GOV.z), 0.95), rod(p, vec3(GOV.x, 0.95, GOV.z), RIDE, 0.018)));
+  iron = min(iron, min(legs(p, FLOOR1, 0.21), legs(p, FLOOR2, 0.24)));
+  vec3 m = vec3(abs(p.x), p.yz);
+  iron = min(iron, rod(m, vec3(0.27, 0.2, 0.2), vec3(0.44, 0.0, 0.32), 0.016));
+  take(best, iron, IRON, vec2(0.0));
+  // The drumsticks: brown wood, thick at the hand and tapering to a small bead
+  for (int i = 0; i < 2; i++) {
+    vec3 a = uStick[i * 2], b = uStick[i * 2 + 1], pa = p - a, ba = b - a;
+    float k = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    take(best, min(length(pa - ba * k) - mix(0.027, 0.015, k), length(p - b) - 0.021), WOOD, vec2(0.0));
+  }
+
+  // Pipework: the arms that hold the toms, a little stack for the steam, a feed pipe to the floor tom, a piston that nods with the kick
+  float pipe = rod(p, vec3(0.0, 0.7, 0.02), vec3(0.0, 0.86, 0.02), 0.03);
+  pipe = min(pipe, rod(m, vec3(0.0, 0.86, 0.02), vec3(0.2, 0.9, 0.0), 0.025));
+  pipe = min(pipe, rod(p, vec3(0.0, 0.68, -0.12), STACK, 0.022));
+  pipe = min(pipe, rod(p, STACK - vec3(0.0, 0.02, 0.0), STACK + vec3(0.0, 0.015, 0.0), 0.034));
+  pipe = min(pipe, rod(p, vec3(-0.33, 0.3, -0.08), vec3(-0.46, 0.3, -0.28), 0.014));
+  pipe = min(pipe, rod(p, vec3(0.15, 0.7, 0.14), vec3(0.15, 0.755 + 0.03 * uHit[0], 0.14), 0.02));
+  // The governor on the ride's stand: two little weights going round
+  vec3 fling = vec3(cos(uSpin), 0.0, sin(uSpin)) * 0.06;
+  pipe = min(pipe, min(length(p - GOV - fling), length(p - GOV + fling)) - 0.024);
+  take(best, pipe, COPPER, vec2(0.0));
+
+  // A pressure dial on the near floor tom
+  vec3 dq = p - DIAL;
+  take(best, length(dq) - 0.045, GAUGE, vec2(dot(normalize(dq), normalize(vec3(0.3, 0.1, 1.0))), 0.0));
+
+  // Cymbals: the hi-hat pair, the ride, and a crash either side
+  float brassy = cymbal(p, HAT, vec3(0.0, 1.0, 0.0), 0.17, -0.12);
+  brassy = min(brassy, cymbal(p, HAT + vec3(0.0, uHat, 0.0), vec3(0.0, 1.0, 0.0), 0.17, 0.12));
+  brassy = min(brassy, cymbal(p, RIDE, normalize(uCym[0]), 0.29, 0.1));
+  brassy = min(brassy, cymbal(p, CRASH1, normalize(uCym[1]), 0.23, 0.15));
+  brassy = min(brassy, cymbal(p, CRASH2, normalize(uCym[2]), 0.25, 0.15));
+  take(best, brassy, CYMBAL, vec2(0.0));
+
+  // Steam
+  for (int i = 0; i < 2; i++) if (uPuff[i].w > 0.004) {
+    vec3 q = p - uPuff[i].xyz;
+    take(best, length(q) - uPuff[i].w * (1.0 + 0.6 * (noise(q * 7.0 + 3.0) - 0.5)), STEAM, vec2(0.0));
+  }
+  return best;
+}
+float map(vec3 p) { return scene(p).x; }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.016, -0.016);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 2.6) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+// Five tones of one colour, the top one a glint
+vec3 ramp(vec3 base, float t) { float s = stepped(t, 4.0); return base * (0.36 + 0.74 * s) + vec3(0.25) * max(s - 0.75, 0.0) * 4.0; }
+
+// The small gear stencilled faintly on the kick's front skin
+bool gearAt(vec2 uv) {
+  uv *= 1.6;
+  float r = length(uv), an = atan(uv.y, uv.x) + uGear;
+  float tooth = step(0.5, fract(an * 8.0 / 6.2832));
+  bool spoke = r < 0.1 && min(abs(sin(an)), abs(cos(an))) * r < 0.016;
+  return (r < 0.175 + 0.045 * tooth && r > 0.095) || r < 0.04 || spoke;
+}
+
+// The land: a white page that is secretly six-sided columns, like the Giant's Causeway. It lies flat until a kick sends a ring
+// of them heaving outwards from the kit. Nothing beyond it.
+const vec2 MIDDLE = vec2(-0.1, -0.3);   // where the tremors spread from
+const float HEX = 0.37;                // how wide a column is
+const float TALLEST = 0.75;            // no column rises higher than this
+// The middle of the column a spot belongs to
+vec2 column(vec2 q) {
+  const vec2 s = vec2(1.0, 1.7320508);
+  q /= HEX;
+  vec4 hc = floor(vec4(q, q - vec2(0.5, 1.0)) / s.xyxy) + 0.5;
+  vec4 h = vec4(q - hc.xy * s, q - (hc.zw + 0.5) * s);
+  return (dot(h.xy, h.xy) < dot(h.zw, h.zw) ? hc.xy * s : (hc.zw + 0.5) * s) * HEX;
+}
+// The city: the same basalt columns, grown into skyscrapers. The ground behind the kit is divided into lots, and as the drums
+// play a bundle of columns pushes up out of some of them, each in its own time: a slim tower, stepped in near the top,
+// its columns ending at uneven heights like organ pipes.
+const float LOT = 1.25;
+float city(vec2 c) {
+  if (uCity <= 0.0 || c.y > -2.9) return 0.0;
+  vec2 lot = floor(c / LOT), in_ = abs(fract(c / LOT) - 0.5) * LOT;
+  float k = fract(sin(dot(lot, vec2(41.3, 289.1))) * 43758.5453);
+  if (k < 0.35) return 0.0;   // some lots stay empty, so the towers stand apart
+  float edge = max(in_.x, in_.y) / (0.3 + 0.12 * fract(k * 57.3));
+  if (edge > 1.0) return 0.0;
+  float crown = 0.16 * floor(fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453) * 3.0);
+  return ((1.5 + 2.0 * fract(k * 7.9)) * (edge < 0.55 ? 1.0 : 0.72) - crown) * smoothstep(0.0, 0.25, uCity - 0.7 * fract(k * 13.7));
+}
+float land(vec2 q) {
+  vec2 c = column(q);
+  float r = length(c - MIDDLE), seat = city(c);
+  if (r < 1.45) return seat;   // flat under the kit
+  float h = 0.0;
+  for (int i = 0; i < 10; i++) { float x = (r - uRing[i].x) / 0.28; h += uRing[i].y * exp(-x * x); }
+  float own = fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453); own = pow((1.0 + floor(own * 5.0)) / 5.0, 1.6);   // every column in a ring rises, to one of five heights, a few of them far above the rest
+  // The stones stand a little uneven even at rest, from the kit's feet out as far as you can see; the rings weaken with distance but never stop
+  return seat + min((0.05 * uWake + uTremor * 0.34 * h * (1.0 - 0.6 * smoothstep(2.5, 6.0, r))) * own * (0.25 + 0.75 * smoothstep(1.6, 2.8, r)) * smoothstep(1.45, 1.75, r), TALLEST - 0.02);
+}
+// How far along a ray the land is met
+float toLand(vec3 ro, vec3 rd) {
+  float t = max(0.0, (TALLEST + (uCity > 0.0 ? 3.6 : 0.0) - ro.y) / rd.y), level = -ro.y / rd.y, last = t;
+  bool met = false;
+  for (int i = 0; i < 150 && t < level; i++) {
+    vec3 g = ro + rd * t;
+    float d = g.y - land(g.xz);
+    if (d < 0.003) { met = true; break; }
+    last = t;
+    t += clamp(d * 0.6, 0.004, 0.2);   // short steps, or a ray would jump clean through a tower
+  }
+  // Having stepped into a wall, back up to its face, so the glass is painted where it really is
+  if (met) for (int i = 0; i < 6; i++) {
+    float mid = 0.5 * (last + t); vec3 g = ro + rd * mid;
+    if (g.y - land(g.xz) < 0.003) t = mid; else last = mid;
+  }
+  return min(t, level);
+}
+// Its colour at a place: dark stone where it lies flat; a risen column flushes on its top and is darker still on its sides
+vec3 landAt(vec3 g, vec2 s, float shade) {
+  float h = land(g.xz);
+  vec2 o = g.xz - column(g.xz);
+  // A pool of light round the kit, falling away in bands, so the kit stands out and the far stones sink into the dark
+  float x = (1.0 - smoothstep(0.8, 3.4, length(g.xz - MIDDLE))) * 4.0;
+  float pool = 0.45 + 0.25 * uWake + 0.3 * uGlow * (floor(x) + (smoothstep(0.35, 0.65, fract(x)) > dots() ? 1.0 : 0.0));
+  if (h - g.y > 0.006) {
+    float face = dot(normalize(o), normalize(uLight.xz)) > 0.2 ? 1.0 : 0.55;
+    if (city(g.xz - o) > 0.4) {
+      // A tower's wall: basalt that flushes wine by steps as it climbs, with one slit window in every face of every column
+      // at every storey. The windows are dark until fire climbs the tower from its foot, higher as the frenzy grows.
+      vec2 a = abs(o), nrm = a.x > dot(a, vec2(0.5, 0.866)) ? vec2(1.0, 0.0) : vec2(0.5, 0.866);
+      float across = abs(a.x * nrm.y - a.y * nrm.x), fy = fract(g.y / 0.3);
+      if (across < 0.06 && fy > 0.35 && fy < 0.8 && g.y > 0.3 && g.y < h - 0.2) {
+        float k = fract(sin(dot(g.xz - o, vec2(12.9, 78.2)) + floor(g.y / 0.3) * 7.1) * 43758.5453);
+        return k < 0.8 && g.y < h * (0.1 + 0.9 * uFury) ? vec3(0.98, 0.5, 0.18) * (0.6 + 0.4 * face) : vec3(0.05, 0.03, 0.07);
+      }
+      return mix(uGround * 1.1, vec3(0.4, 0.08, 0.15), 0.4 * floor(min(g.y / 3.0, 1.0) * 3.0) / 3.0) * face;
+    }
+    return uGround * pool * face * 0.72;
+  }
+  // Flat tones by how far it has risen, and a seam round each risen column so the six sides show
+  float rim = max(abs(o.x), dot(abs(o), vec2(0.5, 0.866))) - HEX * 0.5;
+  // The higher a column stands, the more wine-red its top, in three flat steps
+  float flush = floor(min(h / 0.3, 1.0) * 3.0 + 0.5) / 3.0;
+  // The flush is the same quiet wine near and far, so the stones never outshine the kit
+  vec3 top = rim > -0.025 ? uGround * pool * (h < 0.006 ? 0.88 : 0.7) : mix(uGround * pool, mix(vec3(0.4, 0.08, 0.15), vec3(0.8, 0.14, 0.2), uFury) * (0.5 + 0.5 * uWake), 0.75 * flush);
+  return top * (1.0 - 0.55 * shade);
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = toLand(ro, rd), tHit = -1.0, t = 0.0;
+  for (int i = 0; i < 110 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.003) { tHit = t; break; }
+    t += d * 0.75;   // steam is too lumpy to trust a full step
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    vec4 hit = scene(p); float mat = hit.y; vec2 uv = hit.zw;
+    float lamp = lightAt(p + n * 0.03);
+    float lit = max(dot(n, uLight), 0.0) * lamp;
+    float glint = pow(max(dot(reflect(-uLight, n), -uFwd), 0.0), 10.0) * lamp;
+    float nook = clamp(0.5 + 0.5 * map(p + n * 0.06) / 0.06, 0.0, 1.0);
+    float metal = (0.34 + 0.5 * lit + 0.6 * glint) * nook;
+    if (mat == BRASS) {
+      bool lug = fract(uv.x * 6.0 / 6.2832) < 0.2 && abs(uv.y) < 0.62;   // copper lugs round the shell
+      col = ramp(lug ? COPPER_C : uBrass, metal);
+    }
+    else if (mat == HEAD) col = ramp(CREAM, (0.45 + 0.5 * lit) * nook + 0.3 * uv.x);
+    else if (mat == FRONT) col = ramp(gearAt(uv) ? CREAM * vec3(0.9, 0.8, 0.7) : CREAM, 0.45 + 0.5 * lit + 0.3 * uHit[0]);
+    else if (mat == COPPER) col = ramp(COPPER_C, metal);
+    else if (mat == IRON) col = ramp(uStands, metal);
+    else if (mat == WOOD) col = ramp(WOOD_C, 0.4 + 0.55 * lit);
+    else if (mat == CYMBAL) col = ramp(CYMBAL_C, metal + 0.1);
+    else if (mat == GAUGE) col = uv.x > 0.8 ? ramp(CREAM, 0.5 + 0.4 * lit) : ramp(COPPER_C, metal);
+    else col = mix(vec3(0.72, 0.74, 0.83), vec3(0.95, 0.96, 0.98), stepped(0.25 + 0.75 * lit, 2.0));
+    col *= 0.45 + 0.55 * uWake;   // the kit sits dim until the place wakes
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    float dim = 1.0 - lightAt(g + vec3(0.0, 0.02, 0.0));
+    col = landAt(g, s, stepped(dim, 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.2 }, uBrass: { value: new THREE.Color() },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(-0.1, 0.8, -0.2) }, uLight: { value: V() },
+  uCym: { value: [V(0, 1, 0), V(0, 1, 0), V(0, 1, 0)] }, uStick: { value: [V(), V(), V(), V()] },
+  uGear: { value: 0 }, uHat: { value: 0.03 }, uBounce: { value: 1 }, uSpin: { value: 0 },
+  uHit: { value: [0, 0, 0, 0, 0, 0] },
+  uPuff: { value: [new THREE.Vector4(), new THREE.Vector4()] },
+  uRing: { value: Array.from({ length: 10 }, () => new THREE.Vector2()) }, uTremor: { value: 1 }, uGround: { value: new THREE.Color() }, uStands: { value: new THREE.Color() },
+  uWake: { value: 0 }, uGlow: { value: 0 }, uFury: { value: 0 }, uCity: { value: 0 },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1, closeSpan = 1.2;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  closeSpan = Math.max(1.2, 1.6 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.42 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+// The story, in parts whose lengths can be dragged on the timeline: the beat building and the first towers rising behind it,
+// the crash that brings the rest up, one huge bar under their lit windows, and the city sinking back as the beat comes round
+const S = sections({ build: 4, eruption: 1, reign: 2, collapse: 1.5 });
+const T_BUILD = 0, T_ERUPT = 4, T_REIGN = 5, T_FALL = 7;   // when those parts begin, as written
+const LOOP = 4;   // the two bars of the build
+const P = params({
+  brass: '#dba63f',          // the colour of the shells
+  steam: [1, 0, 2],          // how big the puffs from the stack are
+  bounce: [1, 0, 2],         // how hard it plays: stick swing, drum give, cymbal rock
+  tremor: [1, 0, 2],         // how high the ground heaves with each kick
+  zoom: [1.35, 1, 2.5],      // how far back you stand: 1 is close on the kit
+  ground: '#33202b',         // the dark stone everything stands on
+  stands: '#b5ada0',         // the metal of the stands, legs and spurs
+});
+
+// Two bars at 120, counted in sixteenths (32 to the loop). Where a stick lands on each piece:
+const S16 = LOOP / 32;
+const SPOT = {
+  SN: [0.42, 0.715, -0.53], T1: [0.25, 1.09, -0.04], T2: [-0.25, 1.09, -0.04], F1: [-0.62, 0.65, -0.44], F2: [-1.05, 0.68, -0.8],
+  HH: [0.85, 0.955, -0.55], RD: [-0.82, 1.225, -0.44], C1: [0.57, 1.46, -0.42], C2: [-0.47, 1.51, -0.42],
+};
+// The two sticks: where the hand that isn't there rests, and what each strikes when. Each keeps to its own side of the kit.
+// Bar one is seven against eight: this hand plays eight in threes round hat, snare and tom while the other fits seven even strokes round its side.
+// Bar two is one long fill in sixteenths, shared between them.
+// After those two bars they crash as the city comes up, play one huge bar, and keep a quiet pulse while it sinks,
+// ending on the stroke the loop begins with. Strokes are [when in seconds, where].
+const bar = (at, list) => list.map(([s, name]) => [at + s * S16, name]);
+const STICKS = [
+  { home: [0.3, 1.3, -0.85], side: 0.035, rest: [[0.62, 0.725, -0.74], [0.3, 0.725, -0.36]], strokes: [
+    ...bar(T_BUILD, [[0, 'HH'], [2, 'SN'], [4, 'T1'], [6, 'HH'], [8, 'SN'], [10, 'T1'], [12, 'HH'], [14, 'SN'],
+      [16, 'C1'], [18, 'SN'], [19, 'T1'], [21, 'HH'], [23, 'SN'], [24, 'T1'], [26, 'SN'], [27, 'T1'], [29, 'SN']]),
+    [T_ERUPT, 'C1'],
+    ...bar(T_REIGN, [[0, 'C1'], [2, 'SN'], [4, 'T1'], [6, 'SN'], [8, 'C1'], [10, 'SN'], [11, 'T1'], [12, 'SN'], [14, 'T1'], [16, 'C1']]), [7.5, 'HH'], [8, 'HH'], [8.5, 'HH']] },
+  { home: [-0.3, 1.3, -0.85], side: -0.035, rest: [[0.18, 0.725, -0.76], [0.52, 0.725, -0.38]], strokes: [
+    ...bar(T_BUILD, [...['C2', 'T2', 'F1', 'RD', 'T2', 'F2', 'RD'].map((name, i) => [i * 16 / 7, name]),
+      [16, 'RD'], [17, 'T2'], [20, 'F1'], [22, 'RD'], [25, 'T2'], [28, 'F1'], [29, 'F2']]),
+    [T_ERUPT, 'C2'],
+    ...bar(T_REIGN, [[0, 'C2'], [3, 'T2'], [4, 'F1'], [6, 'F2'], [8, 'RD'], [10, 'T2'], [12, 'F1'], [13, 'F2'], [14, 'T2'], [16, 'C2']]), [8.5, 'C2']] },
+];
+// The kick plays itself: [when, how hard]. Two soft thumps under the count, a build that grows, one great blow at the summoning, then eighths under the drummer
+const KICKS = [...[0, 4, 8, 12, 16, 19, 22, 24, 27, 30].map((s, i) => [T_BUILD + s * S16, 0.5 + 0.05 * i]),
+  [T_ERUPT, 1.7], [T_ERUPT + 0.5, 1.1], ...[0, 2, 4, 6, 8, 10, 12, 14].map(s => [T_REIGN + s * S16, 1.4]), [T_FALL, 1.8], [7.5, 0.4], [8, 0.4], [8.5, 0.5]];
+// How each part of the story comes and goes: [when, how much, how to arrive]
+const EASE = { lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5, fall: x => x ** 4, back: x => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2 };
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i];
+    return a + (b - a) * EASE[how]((t - t0) / (t1 - t0));
+  }
+  return track[track.length - 1][1];
+}
+const WAKE = [[0, 1]];                                  // the light and the stones coming alive
+const FURY = [[0, 0], [4, 0.35, 'in'], [4.15, 1, 'snap'], [7.2, 1], [8.2, 0]];      // the frenzy
+const CITY = [[0, 0], [4, 0.5, 'lin'], [5, 1, 'out'], [7.3, 1], [8.3, 0, 'in']];    // the city coming up: a few buildings through the build, the rest at the crash
+const LAID = [[0, 0]];                // the sticks lying on the snare
+const CALM = [[7.4, 0], [8.3, 1]];                                                  // everything that still rings dying away
+// When each piece is struck, in seconds; the kick plays itself: four on the floor under the sevens, then broken up under the fill
+const WHEN = { KICK: KICKS.map(k => k[0]) };
+for (const k in SPOT) WHEN[k] = [];
+for (const st of STICKS) for (const [at, name] of st.strokes) WHEN[name].push(at);
+const DRUMS = ['KICK', 'SN', 'T1', 'T2', 'F1', 'F2'];
+// Which way each rocking cymbal faces at rest: ride, then the crashes
+const CYMS = [['RD', [0.08, 1, -0.12], 0.1], ['C1', [-0.1, 1, -0.2], 0.22], ['C2', [0.1, 1, -0.2], 0.22]];
+
+const easeOut = x => 1 - (1 - x) ** 3, io = x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2;
+// Time from a hit, negative before it, going the short way round the loop
+const since = (t, h) => ((t - h) % LOOP + LOOP * 1.5) % LOOP - LOOP / 2;
+// How lately struck: up to 1 in the instant before the hit, gone a moment after
+const ring = dt => dt >= 0 && dt < 0.3 ? (1 - dt / 0.3) ** 2 : dt > -0.05 && dt < 0 ? (1 + dt / 0.05) ** 2 : 0;
+const struck = (name, t) => { let v = 0; for (const h of WHEN[name]) v = Math.max(v, ring(t - h)); return v; };
+// A cymbal's rock: every hit sets it swinging, and each swing dies away before the loop comes round
+function rock(name, t) {
+  let v = 0;
+  for (const h of WHEN[name]) { const dt = t - h; if (dt > 0) v += Math.exp(-2.2 * dt) * Math.sin(dt * Math.PI * 4); }
+  return v;
+}
+// Where a stick is: after a stroke it rebounds a little and the hand carries it over the next piece, low; the wrist cocks just before, then snaps down
+const STICK_LEN = 0.56;
+function stickAt(stick, t, butt, tip, laid, big) {
+  const st = stick.strokes, n = st.length;
+  let i = -1;
+  for (let k = 0; k < n; k++) if (st[k][0] <= t) i = k;
+  // Before the first stroke it waits over it; after the last it stays where it struck
+  const before = i < 0, after = i === n - 1;
+  i = Math.max(i, 0);
+  const j = Math.min(i + (before ? 0 : 1), n - 1), t0 = before ? t - 9 : st[i][0], t1 = after ? t + 9 : st[j][0];
+  const gap = t1 - t0, ts = t - t0, tn = t1 - t, k = io(Math.min(1, ts / Math.min(gap, 0.3))), a = SPOT[st[i][1]], b = SPOT[st[j][1]];
+  const gx = a[0] + (b[0] - a[0]) * k + stick.side, gy = a[1] + (b[1] - a[1]) * k, gz = a[2] + (b[2] - a[2]) * k;
+  const cock = 0.55 + 0.45 * io(clamp(1 - (tn - 0.06) / 0.18, 0, 1));
+  const high = big * P.bounce * Math.min(0.2, 0.08 + 0.4 * gap) * Math.min(easeOut(Math.min(1, ts / 0.1)) * cock, tn / 0.06);
+  butt.set(stick.home[0] - gx, stick.home[1] - gy, stick.home[2] - gz).setLength(STICK_LEN);
+  butt.x += gx; butt.y += gy + 0.25 * high; butt.z += gz;
+  tip.set(gx - butt.x, gy + high - butt.y, gz - butt.z).setLength(STICK_LEN).add(butt);
+  // Lying on the snare, or on the way there
+  if (laid > 0) {
+    const [rb, rt] = stick.rest;
+    butt.set(butt.x + (rb[0] - butt.x) * laid, butt.y + (rb[1] - butt.y) * laid, butt.z + (rb[2] - butt.z) * laid);
+    tip.set(tip.x + (rt[0] - tip.x) * laid, tip.y + (rt[1] - tip.y) * laid, tip.z + (rt[2] - tip.z) * laid).sub(butt).setLength(STICK_LEN).add(butt);
+  }
+}
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  // The story runs on the time as written; the sway of the view goes once round the real loop, so it never freezes in a held part
+  const t = S.written(now), round = S.round(now) * Math.PI * 2, U = uniforms;
+  const wake = key(WAKE, t), fury = key(FURY, t), rise = key(CITY, t), calm = 1 - key(CALM, t);
+  U.uWake.value = wake; U.uGlow.value = wake + 0.2 * fury; U.uFury.value = fury; U.uCity.value = rise;
+  U.uTarget.value.y = 0.8 + 0.45 * rise;   // look up as the city rises
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + 0.15 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // The sticks, and how lately each drum was struck
+  for (let i = 0; i < 2; i++) stickAt(STICKS[i], t, U.uStick.value[i * 2], U.uStick.value[i * 2 + 1], key(LAID, t), 1 + 0.6 * rise);
+  for (let i = 0; i < 6; i++) U.uHit.value[i] = struck(DRUMS[i], t);
+  // The hi-hat's top dips when it is struck; the other cymbals rock
+  U.uHat.value = 0.034 - 0.018 * struck('HH', t);
+  for (let i = 0; i < 3; i++) {
+    const [name, rest, much] = CYMS[i], r = much * P.bounce * calm * rock(name, t);
+    U.uCym.value[i].set(rest[0] + 0.4 * r, 1, rest[2] - r);
+  }
+  // The gear on the kick ticks on one tooth a beat, and the governor goes round twice a loop
+  const beat = S.round(now) * 8;   // eight ticks round the real loop, so gear and steam carry on through a held part
+  U.uGear.value = (Math.floor(beat) + easeOut(Math.min(1, (beat % 1) / 0.25))) * Math.PI / 4;
+  U.uSpin.value = round * 2;
+  // A small puff of steam leaves the stack every other beat, rises, and thins to nothing
+  for (let k = 0; k < 2; k++) {
+    const age = (beat % 1) + k;
+    U.uPuff.value[k].set(0.03 * age, 1.2 + 0.16 * age, -0.12, 0.055 * P.steam * wake * (1 + 0.8 * fury) * easeOut(Math.min(1, age / 0.25)) * (1 - age / 2));
+  }
+  // Each kick sends a ring out through the ground, weakening as it goes
+  const live = [];
+  for (const [at, hard] of KICKS) { const age = t - at; if (age >= 0 && age < 2.2) live.push([age, hard]); }
+  live.sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < 10; i++) {
+    const [age, hard] = live[i] || [0, 0];
+    U.uRing.value[i].set(1.2 + 1.8 * age, hard * calm * Math.min(1, age / 0.1) * (1 - age / 2.2) ** 1.5);
+  }
+  U.uStands.value.set(P.stands).convertLinearToSRGB();
+  U.uTremor.value = P.tremor;
+  U.uGround.value.set(P.ground).convertLinearToSRGB();   // the colour as picked, not darkened
+  U.uSpan.value = closeSpan * P.zoom * (1 + 0.2 * rise);   // and stand back to take it in
+  U.uBounce.value = P.bounce;
+  U.uBrass.value.set(P.brass);
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

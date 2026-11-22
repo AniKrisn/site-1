@@ -1,0 +1,177 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795368659878;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Figure study</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A four second loop. A small figure on a white page walks, runs or swims a front crawl, on the spot or across the page."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+import { figure, glsl as FIGURE } from 'figure';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight;
+uniform vec4 uPlace;   // where the figure stands, and how tall it is
+uniform float uSpan;
+${FIGURE}
+// Skin, hair, top, trousers, shoes: each a dark and a light
+const vec3 DARK[5] = vec3[5](vec3(0.62, 0.4, 0.3), vec3(0.1, 0.08, 0.1), vec3(0.62, 0.16, 0.14), vec3(0.14, 0.2, 0.38), vec3(0.08, 0.08, 0.1));
+const vec3 LIGHT[5] = vec3[5](vec3(0.98, 0.8, 0.66), vec3(0.3, 0.24, 0.26), vec3(0.98, 0.42, 0.3), vec3(0.36, 0.5, 0.78), vec3(0.3, 0.3, 0.34));
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+// The thing
+float map(vec3 p) { return figure((p - uPlace.xyz) / uPlace.w) * uPlace.w; }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.006, -0.006);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / t);
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 2.6) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+// The land: what the thing stands on and its shadow falls on. Here a flat white page, with nothing beyond it.
+vec3 landAt(vec3 g, vec2 s, float shade) { return vec3(1.0 - 0.24 * shade); }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0, t = 0.0;
+  for (int i = 0; i < 64 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.003) { tHit = t; break; }
+    t += d;
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    float glow = clamp(dot(n, uLight) * 0.6 + 0.4, 0.0, 1.0);
+    int part = figurePart((p - uPlace.xyz) / uPlace.w);
+    col = mix(DARK[part], LIGHT[part], stepped(glow * lightAt(p + n * 0.02) * 0.7 + glow * 0.3, 3.0));
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    float dim = 1.0 - lightAt(g + vec3(0.0, 0.02, 0.0));
+    col = landAt(g, s, stepped(dim, 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.2 }, uPlace: { value: new THREE.Vector4() }, uJ: { value: new Float32Array(54) }, uHead: { value: 0 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.5, 0) }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.2, 1.2 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.3 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 4;
+const P = params({
+  size: [0.9, 0.4, 1.2],                              // how tall the figure is
+  move: { value: 0, min: 0, max: 2, step: 1 },        // 0 walks, 1 runs, 2 swims
+  across: false,                                      // goes across the page, not on the spot
+  heads: { value: 6, min: 4, max: 8, step: 0.5 },     // how many of its own heads tall it is
+});
+let man = figure({ heads: 6 }), made = 6;
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.3 + 0.15 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  if (P.heads !== made) man = figure({ heads: made = P.heads });
+  // Two cycles a loop, whichever it is doing; going across, it covers exactly the ground its feet say it does
+  const u = t / LOOP * 2, pose = P.move === 0 ? man.walk(u) : P.move === 1 ? man.run(u) : man.crawl(u, { depth: 0.12 });
+  const far = P.move === 2 ? 0.5 : pose.travel, gone = P.across ? far * (u - 1) : 0;
+  pose.hip = [pose.hip[0] + gone, pose.hip[1], pose.hip[2]];
+  man.joints(pose, U.uJ.value);
+  U.uHead.value = man.bones.head;
+  U.uPlace.value.set(0, 0, 0, P.size);
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

@@ -1,0 +1,247 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794603255390;window.__values={"coat":"#ebc13e","wag":0.558,"pant":1.09,"spikyness":0.42};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Golden Labrador</title>
+<style>
+  /* Layout: a white page with one dog sitting on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A three second loop. A golden labrador sits on a white page, panting, tilting its head and sweeping its tail across the floor."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uCoat;
+uniform mat3 uHead;
+uniform vec3 uTail[5];
+uniform float uSpan, uBreath, uTongue, uSpiky;
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const vec3 PIVOT = vec3(0.0, 0.8, 0.08);   // where the head turns on the neck
+const vec3 DARK = vec3(0.13, 0.08, 0.06);  // nose and eyes
+const vec3 PINK = vec3(0.86, 0.42, 0.45);  // tongue
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+vec3 toHead(vec3 p) { return uHead * (p - PIVOT) + PIVOT; }
+
+// Broad skull, blunt square muzzle, soft ears hanging by the cheeks
+float headPart(vec3 hq) {
+  vec3 q = vec3(abs(hq.x), hq.yz);
+  float d = egg(q, vec3(0.0, 0.92, 0.1), vec3(0.125, 0.115, 0.13));
+  d = smin(d, rod(q, vec3(0.0, 0.89, 0.17), vec3(0.0, 0.865, 0.31), 0.072, 0.062), 0.05);     // muzzle
+  d = smin(d, ball(q, vec3(0.055, 0.86, 0.21), 0.055), 0.04);                                 // cheeks
+  d = smin(d, rod(q, vec3(0.0, 0.83, 0.16), vec3(0.0, 0.82 - uTongue * 0.01, 0.27), 0.05, 0.04), 0.03); // jaw
+  return smin(d, egg(q, vec3(0.13, 0.85, 0.075), vec3(0.032, 0.09, 0.065)), 0.025);           // ears
+}
+float features(vec3 hq) {
+  vec3 q = vec3(abs(hq.x), hq.yz);
+  return min(egg(hq, vec3(0.0, 0.885, 0.365), vec3(0.036, 0.028, 0.026)), ball(q, vec3(0.062, 0.935, 0.2), 0.02));
+}
+float tongue(vec3 hq) { return egg(hq, vec3(0.0, 0.81 - 0.035 * uTongue, 0.3), vec3(0.034, 0.02 + 0.04 * uTongue, 0.02)); }
+float bodyPart(vec3 p) {
+  vec3 q = vec3(abs(p.x), p.yz);
+  float d = egg(q, vec3(0.0, 0.22, -0.2), vec3(0.2, 0.21, 0.24));                                         // rump
+  d = smin(d, egg(q, vec3(0.13, 0.2, -0.14), vec3(0.12, 0.19, 0.22)), 0.06);                               // haunches
+  d = smin(d, rod(q, vec3(0.0, 0.28, -0.12), vec3(0.0, 0.58, 0.05), 0.19 + uBreath, 0.15 + uBreath), 0.08); // back and belly
+  d = smin(d, ball(q, vec3(0.0, 0.47, 0.1), 0.135 + uBreath), 0.06);                                     // chest
+  d = smin(d, rod(q, vec3(0.0, 0.55, 0.03), vec3(0.0, 0.82, 0.1), 0.12, 0.1), 0.06);                      // neck
+  d = smin(d, rod(q, vec3(0.085, 0.42, 0.11), vec3(0.085, 0.06, 0.17), 0.052, 0.042), 0.04);              // forelegs
+  d = smin(d, egg(q, vec3(0.085, 0.032, 0.205), vec3(0.05, 0.032, 0.07)), 0.03);                          // and their paws
+  d = smin(d, egg(q, vec3(0.16, 0.03, 0.03), vec3(0.055, 0.03, 0.1)), 0.04);                              // hind feet
+  float tail = 1e3;
+  for (int i = 0; i < 4; i++) tail = min(tail, rod(p, uTail[i], uTail[i + 1], 0.05 - 0.007 * float(i), 0.043 - 0.007 * float(i)));
+  return smin(d, tail, 0.05);
+}
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+// Tufts that stand out of the coat, sharp at the tips; kept off the eyes and nose
+float tufts(vec3 p, vec3 hq) {
+  if (uSpiky <= 0.0) return 0.0;
+  vec3 f = mix(p, hq, smoothstep(0.66, 0.76, p.y));   // on the head the tufts turn with it
+  float n = noise(f * vec3(30.0, 18.0, 30.0)) * 0.7 + noise(f * vec3(55.0, 30.0, 55.0)) * 0.3;
+  vec3 q = vec3(abs(hq.x), hq.yz);
+  float clear = smoothstep(0.03, 0.08, min(length(q - vec3(0.062, 0.935, 0.2)), length(hq - vec3(0.0, 0.885, 0.365))));
+  return uSpiky * 0.07 * pow(n, 3.0) * clear;
+}
+float coat(vec3 p) { vec3 hq = toHead(p); return smin(bodyPart(p), headPart(hq), 0.05) - tufts(p, hq); }
+float map(vec3 p) { vec3 hq = toHead(p); return min(coat(p), min(features(hq), tongue(hq))); }
+
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.008, -0.008);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.03;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 8.0 * d / t);
+    t += clamp(d, 0.02, 0.14);
+    if (res < 0.01 || t > 2.0) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0, t = 0.0;
+  for (int i = 0; i < 110 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.002) { tHit = t; break; }
+    t += d * (0.9 - 0.4 * min(uSpiky, 1.0));   // tufts are too sharp to trust a full step
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p), hq = toHead(p);
+    float lit = max(dot(n, uLight), 0.0) * lightAt(p + n * 0.02);
+    float nook = clamp(0.5 + 0.5 * map(p + n * 0.06) / 0.06, 0.0, 1.0);
+    float glow = (lit * 0.7 + 0.3) * nook;
+    if (features(hq) < 0.004) col = DARK * (0.7 + 0.9 * stepped(glow, 2.0));
+    else if (tongue(hq) < 0.004) col = PINK * (0.65 + 0.35 * stepped(glow, 2.0));
+    else {
+      // Shadowed gold to sunlit cream, in four steps
+      vec3 deep = uCoat * vec3(0.74, 0.64, 0.56), pale = mix(uCoat, vec3(1.0, 0.96, 0.86), 0.45);
+      col = mix(deep, pale, stepped(glow, 3.0));
+    }
+  } else if (tFloor > 0.0) {
+    // The page, and the shadow on it
+    vec3 g = ro + rd * tFloor;
+    float dim = 1.0 - lightAt(g + vec3(0.0, 0.01, 0.0));
+    float under = 1.0 - clamp(map(g) / 0.1, 0.0, 1.0);
+    col = vec3(1.0 - 0.24 * stepped(max(dim, under * under), 2.0));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 0.8 }, uCoat: { value: new THREE.Color() },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.46, -0.12) }, uLight: { value: V() },
+  uHead: { value: new THREE.Matrix3() }, uTail: { value: [V(), V(), V(), V(), V()] }, uBreath: { value: 0 }, uTongue: { value: 0 }, uSpiky: { value: 0 },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(0.8, 0.8 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.28 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+const LOOP = 3;
+const P = params({
+  coat: '#ebc177',      // the colour of the fur
+  wag: [0.6, 0, 1.2],    // how far the tail sweeps
+  pant: [1, 0, 2],       // how hard it pants, and how far the tongue hangs
+  spikyness: [0, 0, 1.5], // how much the fur sticks out in tufts
+});
+const turn = new THREE.Matrix4(), euler = new THREE.Euler();
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = now % LOOP, round = t / LOOP * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: three-quarters on, with a slow sway
+  const yaw = 0.55 + 0.1 * Math.sin(round) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // One curious head tilt a loop, with a little nod on each pant
+  const pant = Math.sin(round * 6);
+  euler.set(-0.08 - 0.03 * pant * P.pant, 0.12 * Math.sin(round), 0.18 * Math.sin(round + 0.6), 'YXZ');
+  turn.makeRotationFromEuler(euler);
+  U.uHead.value.setFromMatrix4(turn).transpose();
+  U.uBreath.value = 0.006 * pant * P.pant;
+  U.uTongue.value = P.pant * (0.75 + 0.25 * pant);
+
+  // Four sweeps of the tail a loop, the tip trailing behind the root
+  let x = 0.04, z = -0.38, y = 0.11, dir = 0.5;
+  U.uTail.value[0].set(x, y, z);
+  for (let i = 1; i < 5; i++) {
+    dir += P.wag * 0.45 * Math.sin(round * 4 - i * 0.55);
+    x += Math.sin(dir) * 0.1; z -= Math.cos(dir) * 0.1; y = Math.max(0.035, y - 0.025);
+    U.uTail.value[i].set(x, y, z);
+  }
+  U.uCoat.value.set(P.coat);
+  U.uSpiky.value = P.spikyness;
+
+  renderer.render(scene, camera);
+}
+loop(LOOP, frame);
+</script>
+</body></html>

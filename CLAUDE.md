@@ -53,6 +53,25 @@ export with `cd viewer && npm run build` if only the viewer changed.
 Check it before it goes out with `npx vite preview --port 4173` from
 `viewer/`, which serves the built `dist/` rather than the dev server.
 
+## Updating scene
+
+It lives at `~/Documents/games/diorama` (the Scenes app, an Electron app
+for making looping scenes with an agent). `/scene/` is a read-only build
+of it: every scene plays and its params and timeline work, but nothing
+can be made, removed or asked for. To ship a change:
+
+```bash
+cd ~/Documents/games/diorama
+npm run build:web                                # writes dist-web/
+rsync -a --delete dist-web/ ~/Documents/code/site_simple/public/scene/
+```
+
+The build reads the tldraw licence key from the app's `.env.local`
+(`VITE_TLDRAW_LICENSE_KEY`, the same key Code editor uses). Scenes in the
+app's Trash are left out, and so are the conversations with the agent.
+It is ~7.5 MB, half of it ink-studio's toolkit, which only the scenes
+written on it need.
+
 ## Weight, and when a project should get its own deployment
 
 Everything in `public/` is committed, and git keeps every version of a

@@ -1,0 +1,646 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795045023840;window.__values={"hanging":1,"graze":1.4,"strike":0.8,"open":0.8,"drain":2.3,"close":0.8,"refill":2.9,"glow":0.7,"sway":0.255,"colour":"#ffab1f"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Enchanted chrysalis</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A loop of ten seconds. Midair, with no ground in sight: a jade chrysalis hangs from a bent twig that grows out of the side of a gargantuan tree, whose ridged trunk fills the left of the picture, with other leafy boughs above and behind, and the pale trunks of a forest of such trees standing off in the white beyond. It sways, with glowing lines winding down it and thick pale ooze along them. While shut it is plain green. An arrow comes up from the bottom right, grazes it, scoring the start of a spiral crack, and is gone, fast and flat, past the trunk into the forest. A second, much faster, goes clean through it and sticks quivering in the trunk, and it cracks the rest of the way. The winding lines crack white from the top down and the shell reluctantly peels open along them into two hanging spiral ribbons and it is brim-full of thick pale goo, which sags out below in three great dollops that drop away out of sight, leaving the shell shrunken. Then the coil snaps shut like a spring, the seam glows white for a moment and cools, and the shell swells back to what it was."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uGlowCol;
+uniform vec2 uSwing;      // how far the chrysalis hangs off plumb, sideways and front to back
+uniform float uOoze;      // how much has wept out along the seams and is hanging on the outside
+uniform float uBite;      // how much of a chunk is missing from the light
+uniform vec3 uArrowTip[2], uArrowDir[2];   // the two arrows: where each one's point is, and which way it points
+uniform vec3 uArrowShow;  // how much of each arrow is there, and how far the first has paled into the distance
+uniform float uMark;      // how long the wound in its side has been weeping
+uniform vec2 uArrowGoo;   // how long each arrow has been carrying goo since it went through the fruit
+uniform vec4 uDollop[3];  // the dollops of goo it drops: how low each one's bead is, how low its rope reaches, how big the bead is and how thick the rope
+uniform float uLevel, uPlump;   // how high the goo still stands inside, and how plump the shell is with it
+uniform float uWell;            // how far the goo has welled out through the gaps
+uniform float uBelly;           // how much of the goo is hanging under the coil in one mass
+uniform float uInflate;         // how far down the body it has filled again
+uniform float uPuff;            // the whole body a touch over or under its size, as it settles
+uniform float uSpan, uPulse, uTurn;
+uniform vec3 uFruit;      // the fruit's colour, as it is in its middle tone
+uniform float uBeads;     // how fat the beads of its skin are
+uniform float uGrade;     // how much bite the final grade gives between light and dark
+uniform float uCrack, uOpen, uHeat;   // how far down the winding line has cracked, how far down it has parted, and how hot the seam still glows
+uniform float uGap, uOrb;             // how wide it parts, and how big the light inside is
+uniform float uStretch, uSlack;       // how far the parted ribbons have dropped, as a slack spring does, and how slack the coil is (0 once it has drawn tight again)
+uniform vec3 uTwig[6];                // the twig's joints from the ground up, bent by the weight
+uniform vec3 uHang;                   // where the thread meets the twig
+uniform vec4 uLeaf;                   // where the leaf is, and how far it has tipped with the twig
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+// Jade for the chrysalis, warm bark for the twig, a fresh green for its leaf, gold for the studs
+// (The fruit's rind keeps the name JADE from when it was green; it is plum now, so it stands apart from the leaves and the arrows)
+const vec3 JADE[5] = vec3[5](vec3(0.05, 0.02, 0.07), vec3(0.17, 0.05, 0.15), vec3(0.36, 0.11, 0.28), vec3(0.62, 0.32, 0.5), vec3(0.9, 0.8, 0.93));   // wine dark, up to a pale bloom
+// A tone of the rind, turned to whatever colour the fruit has been given; the bloom on top stays pale
+vec3 rind(int i) { vec3 c = clamp(JADE[i] * uFruit / JADE[2], 0.0, 1.0); return i == 4 ? mix(c, JADE[4], 0.6) : c; }
+const vec3 WOOD[3] = vec3[3](vec3(0.36, 0.25, 0.2), vec3(0.46, 0.33, 0.25), vec3(0.57, 0.43, 0.32));
+const vec3 LEAF[3] = vec3[3](vec3(0.22, 0.45, 0.2), vec3(0.42, 0.66, 0.26), vec3(0.7, 0.86, 0.4));
+const vec3 GOLD[2] = vec3[2](vec3(0.85, 0.52, 0.16), vec3(1.0, 0.82, 0.36));
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// The thing: a chrysalis in its own hanging space, a twig to hang it from, and one leaf
+vec3 toHang(vec3 p) {
+  vec3 q = p - uHang;
+  float c = cos(uSwing.x), s = sin(uSwing.x); q.xy = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+  c = cos(uSwing.y); s = sin(uSwing.y); q.yz = vec2(c * q.y - s * q.z, s * q.y + c * q.z);
+  return q;
+}
+// How near a spot is to one of the two lines that wind down it: 0 on a line, 0.5 midway between them
+// The coil unwinds a little as it drops and winds back as it draws up, most at the tip.
+float strandAt(vec3 q) { return abs(fract(atan(q.z, q.x) / 3.14159 + q.y * 2.4 + uTurn + 1.1 * uStretch * clamp((-0.4 - q.y) / 0.46, 0.0, 1.0)) - 0.5); }
+// How far the shell has parted along those lines at a spot (0 shut, 1 fully), and how far down the body the spot is (0 top, 1 tip).
+// It parts from the top down, and stays joined at both ends.
+vec2 parted(vec3 q) {
+  float c = (-0.4 - q.y) / 0.46;
+  return vec2(uSlack * clamp((uOpen - c) / 0.25, 0.0, 1.0) * smoothstep(0.0, 0.15, c) * smoothstep(1.0, 0.85, c), c);
+}
+// The shell as if it were solid; where it has parted it loosens and swells a little, like a coil unwinding
+float shell(vec3 q, float loose) {
+  vec3 h = vec3(q.x, q.y, q.z); // It fills again from the top down: above the front it is full, below it still shrunken, and the front itself is a fat ring
+  float c = (-0.3 - q.y) / 0.55;
+  h.xz /= (1.0 + 0.45 * loose) * mix(uPlump, 1.0, smoothstep(uInflate + 0.3, uInflate - 0.3, c)) * uPuff;
+  float d = rod(h, vec3(0.0, -0.3, 0.0), vec3(0.0, -0.85, 0.0), 0.22, 0.07);                    // tapering down to a point
+  // Its skin is a cluster of fat beads, like a blackberry or a bunch of grapes, in rows that sit between one another
+  float girth = mix(0.22, 0.07, clamp((-0.3 - h.y) / 0.55, 0.0, 1.0)), row = floor(h.y * 9.0);
+  float beads = max(4.0, floor(6.2832 * girth / 0.115)), u = atan(h.z, h.x) / 6.2832 * beads + 0.5 * mod(row, 2.0);
+  vec2 f = vec2(fract(u) - 0.5, fract(h.y * 9.0) - 0.5);
+  // The beads are what hold the goo. As it drains they shrivel flat; when it refills they swell again a row at a time
+  // from the stem down, each row a touch too fat as it fills and then settling.
+  float rowAt = (-0.3 - (row + 0.5) / 9.0) / 0.55, full = smoothstep(uInflate + 0.05, uInflate - 0.05, rowAt);
+  float fat = mix(1.0 - 0.8 * clamp((1.0 - uPlump) * 4.0, 0.0, 1.0), 1.0 + 0.4 * exp(-pow((rowAt - uInflate + 0.1) / 0.12, 2.0)), full);
+  return d - 0.032 * uBeads * fat * max(0.0, 1.0 - 3.2 * dot(f, f)) * smoothstep(-0.2, -0.32, h.y);
+}
+// Once parted, the ribbons hang down like a slack spring. This takes a spot on the hanging coil back to where it was on the whole shell.
+vec3 unsprung(vec3 q) { return vec3(q.x, q.y < -0.4 ? -0.4 + (q.y + 0.4) / (1.0 + uStretch) : q.y, q.z); }
+// What weeps out along the winding lines: thick as yoghurt, a fat bead along each seam that sags into slow tongues and never lets go.
+// It sits on the outside of the shell, on the edges of the gaps while they are open and over the seam once it has shut.
+float oozeAt(vec3 q, float loose, float solid) {
+  // (it is gone from wherever the fruit has filled again: the filling draws it back in)
+  float c = (-0.4 - q.y) / 0.46, ends = smoothstep(0.0, 0.12, c) * smoothstep(1.0, 0.88, c) * smoothstep(uInflate - 0.05, uInflate + 0.1, (-0.3 - q.y) / 0.55);
+  if (ends <= 0.0 || uOoze <= 0.0) return 1.0;
+  float r = max(length(q.xz), 0.04), metric = sqrt(1.0 / (9.87 * r * r) + 5.76);
+  float lobe = pow(0.5 + 0.5 * sin(atan(q.z, q.x) * 3.0 + 1.0), 3.0);   // three places round it where it gathers and hangs
+  float d = 1.0;
+  for (int k = 0; k < 3; k++) {
+    vec3 s = vec3(q.x, q.y + float(k) * 0.045 * uOoze * lobe, q.z);
+    float along = abs(strandAt(s) - uGap * loose) / metric;
+    d = smin(d, length(vec2(solid, along)) - uOoze * ends * (0.02 + 0.022 * lobe) * (k == 2 ? 1.0 : 0.85), 0.03 * min(1.0, uOoze * ends * 3.0) + 1e-4);   // it thins away to nothing, so it never pops
+  }
+  return d;
+}
+// The light inside is thick and wet: a ball with a sagging belly
+// Where he carves his chunk out of it: a round hollow in the side nearest him, as a scoop leaves in ice cream
+float bite(vec3 at) { return ball(at, vec3(0.0, -0.6 - 0.3 * uStretch, 0.0) + vec3(-0.62, 0.3, 0.72) * uOrb, 0.62 * uOrb * uBite); }
+// It is full of the stuff. Once it is open you see it brim inside, and it lets go in great dollops: each sags out below
+// on a thick rope, then drops away
+vec3 unsprung(vec3 q);
+float goo(vec3 at) {
+  if (uOrb <= 0.0) return 1e3;
+  vec3 q = unsprung(at);
+  // What is still inside: it clings to the walls and sinks in the middle as it empties
+  float loose = parted(q).x, solid = shell(q, loose), down = clamp((-0.4 - q.y) / 0.46, 0.0, 1.0);
+  float top = q.y - uLevel - 0.5 * length(q.xz) + 0.04, d = max(solid + 0.05, top);
+  // It wells out through the gaps between the ribbons, fattest where it hangs lowest
+  float r = max(length(q.xz), 0.04);
+  // Each welt is rounded: fattest along the middle of its gap, thinning to nothing at the ribbons' edges and above where the goo stands
+  // It is one mass on the move. Lumps of it travel down: through the welts, into the belly, and on down the ropes.
+  float run = sin(at.y * 15.0 + uTurn * 25.133);
+  float knob = sin(at.y * 45.0 + uTurn * 75.398) * cos(atan(at.z, at.x) * 4.0);   // and smaller knobs travel with them, the same on the coil as below it
+  float open = max(uGap * loose, 1e-3), mid = clamp(1.0 - strandAt(q) / open, 0.0, 1.0);
+  float welt = solid + 0.03 - (0.03 + uWell * (0.015 + 0.05 * down) * (1.0 + 0.4 * run + 0.25 * knob) * smoothstep(0.05, -0.1, top)) * mid * (2.0 - mid) * min(1.0, loose * 6.0);
+  d = min(d, welt * 0.6);
+  // What has run down the welts gathers under the coil in one heavy belly
+  float sag = -0.4 - 0.5 * (1.0 + uStretch);
+  if (uBelly > 0.004) d = smin(d, egg(at, vec3(0.0, sag, 0.0), uBelly * vec3(0.072, 0.095, 0.072)) - 0.012 * knob * uBelly, 0.07);
+  // And the belly pours: it draws out below into ropes, each thinning until its drop lets go
+  for (int i = 0; i < 3; i++) {
+    if (uDollop[i].z <= 0.004) continue;
+    float a = float(i) * 2.3 + 0.4; vec2 o = 0.055 * vec2(cos(a), sin(a));
+    vec3 w = at - vec3(0.02 * sin(at.y * 8.0 + float(i) * 2.0), 0.0, 0.0);
+    float lump = uDollop[i].w * (1.0 + 0.24 * run + 0.2 * knob);
+    if (uDollop[i].w > 0.004) d = smin(d, rod(w, vec3(o.x, sag, o.y), vec3(o.x, uDollop[i].y, o.y), lump, lump * 1.1), min(0.1, uDollop[i].w * 2.5));
+    d = smin(d, egg(w, vec3(o.x, uDollop[i].x, o.y), uDollop[i].z * vec3(0.9, 1.5, 0.9)), 0.08);
+  }
+  return d;
+}
+float chrysalis(vec3 at) {
+  vec3 q = unsprung(at);
+  float loose = parted(q).x, solid = shell(q, loose);
+  float d = max(solid, -(solid + 0.055));                                                       // hollow
+  if (loose > 0.0) {
+    // The winding lines pull apart into gaps, leaving the shell as two ribbons
+    float r = max(length(q.xz), 0.04);
+    d = max(d, (uGap * loose - strandAt(q)) / sqrt(1.0 / (9.87 * r * r) + 5.76));
+  }
+  d = min(d, oozeAt(q, loose, solid));
+  d = smin(d, ball(q, vec3(0.0, -0.3, 0.0), 0.2), 0.08);                                        // shoulders
+  d = smin(d, length(vec2(length(q.xz) - 0.2, q.y + 0.25)) - 0.035, 0.04);                      // the ridge the studs sit on
+  d = min(d, goo(at));                                                                          // the light inside it
+  return min(d, rod(q, vec3(0.0), vec3(0.0, -0.14, 0.0), 0.022, 0.03));                         // thread
+}
+const vec3 SPRIG_A = vec3(0.12, 0.3, 0.1), SPRIG_B = vec3(0.06, 0.24, -0.18);   // two small side shoots, as they leave the branch
+float twig(vec3 p) {
+  float d = rod(p, uTwig[0], uTwig[1], 0.21, 0.14);   // stout where it leaves the trunk
+  d = smin(d, rod(p, uTwig[1], uTwig[2], 0.14, 0.095), 0.03);
+  d = smin(d, rod(p, uTwig[2], uTwig[3], 0.095, 0.068), 0.03);
+  d = smin(d, rod(p, uTwig[3], uTwig[4], 0.068, 0.05), 0.03);
+  d = smin(d, rod(p, uTwig[4], uTwig[5], 0.05, 0.03), 0.03);
+  d = smin(d, rod(p, uTwig[2], uTwig[2] + SPRIG_A, 0.03, 0.014), 0.02);
+  return smin(d, rod(p, uTwig[3], uTwig[3] + SPRIG_B, 0.026, 0.012), 0.02);
+}
+// One leaf: where it is, how far it is tipped, and how big
+float leafAt(vec3 p, vec3 c, float w, float size) {
+  vec3 q = (p - c) / size; float cs = cos(w), sn = sin(w);
+  return egg(vec3(cs * q.x - sn * q.y, sn * q.x + cs * q.y, q.z), vec3(0.0), vec3(0.14, 0.04, 0.08)) * size;
+}
+// The leaves: one at the tip, one on each shoot, and a couple along the branch; they all tip with it
+float leaf(vec3 p) {
+  float w = uLeaf.w;
+  float d = leafAt(p, uLeaf.xyz, w, 1.0);
+  d = min(d, leafAt(p, uTwig[2] + SPRIG_A + vec3(0.09, 0.07, 0.0), w - 0.65, 0.9));
+  d = min(d, leafAt(p, uTwig[3] + SPRIG_B + vec3(0.08, 0.08, -0.02), w - 0.8, 0.8));
+  d = min(d, leafAt(p, uTwig[3] + SPRIG_B * 0.5 + vec3(-0.09, 0.05, 0.0), w - 2.4, 0.7));
+  d = min(d, leafAt(p, uTwig[1] + vec3(-0.03, 0.22, 0.06), w - 1.9, 0.85));
+  // And the leaves on the tree's other boughs, which keep still
+  d = min(d, leafAt(p, vec3(-0.8, 2.1, 0.15), 0.5, 1.1));
+  d = min(d, leafAt(p, vec3(-1.02, 2.27, 0.2), -1.0, 1.0));
+  d = min(d, leafAt(p, vec3(-0.45, 1.6, -1.2), 0.4, 1.0));
+  d = min(d, leafAt(p, vec3(0.02, 1.98, -1.4), -0.9, 1.0));
+  return min(d, leafAt(p, vec3(0.52, 2.02, -1.6), 0.2, 1.1));
+}
+// The land: there is no ground. The twig grows out of the side of a gargantuan tree, whose trunk fills the left of the
+// picture and goes on up and down out of sight. Beyond it, nothing but white air.
+// (the tones are kept close together, so when one gives way to the next as the view sways it is a small step, and the tree stays quiet behind the fruit)
+const vec3 BARK[5] = vec3[5](vec3(0.3, 0.21, 0.19), vec3(0.36, 0.26, 0.22), vec3(0.42, 0.31, 0.25), vec3(0.48, 0.36, 0.28), vec3(0.55, 0.42, 0.33));   // plum in the shadows, up to warm tan
+const vec2 TRUNK = vec2(-2.75, -0.6);  // where its middle is, seen from above
+const float GIRTH = 1.6;               // how far from there its bark is
+// Deep ridges running up the bark, wandering: 1 on a ridge, 0 in a furrow
+float ridge(vec3 p) { float a = atan(p.z - TRUNK.y, p.x - TRUNK.x - 0.06 * p.y); return abs(sin(a * 22.0 + 3.0 * sin(p.y * 0.9 + a * 5.0))); }
+float trunk(vec3 p) {
+  vec2 o = p.xz - TRUNK - vec2(0.06 * p.y, 0.0); float a = atan(o.y, o.x);
+  float d = length(o) - GIRTH - 0.1 * sin(p.y * 1.3 + 2.0 * sin(a * 3.0)) - 0.09 * ridge(p);   // it leans, and swells and narrows as it goes up
+  d = smin(d, ball(p, uTwig[0] + vec3(0.1, -0.03, 0.0), 0.28), 0.18);                             // the collar where the branch leaves it
+  d = smin(d, ball(p, vec3(-1.4, 0.25, 0.3), 0.22), 0.15);                                         // a burl
+  d = smin(d, rod(p, vec3(-1.5, 1.9, 0.2), vec3(0.6, 2.9, -0.3), 0.24, 0.15), 0.12);               // a great bough above, going up out of the picture
+  return smin(d, rod(p, vec3(-1.3, 1.4, -1.0), vec3(0.45, 2.0, -1.6), 0.15, 0.07), 0.1);           // and another round the back
+}
+// An arrow: a slim shaft, a broad barbed head cut like a gem, and four swept feathers. It comes and goes in dots.
+const float ARROW = 0.85;   // how long it is
+float dots();
+// A spot in an arrow's own space: how far back from its point, how far out across it front to back, and how far out up and down
+vec3 inArrow(vec3 p, int i) {
+  vec3 dir = uArrowDir[i], a = normalize(cross(dir, vec3(0.0, 1.0, 0.0))), o = p - uArrowTip[i];
+  return vec3(-dot(o, dir), dot(o, a), dot(o, cross(dir, a)));
+}
+// How wide the head is at a place along it, and how wide the feathers: the head swells to its barbs and cuts back; the feathers sweep out towards the tail
+float headWidth(float s) { return s < 0.13 ? 0.075 * s / 0.13 : 0.075 * max(1.0 - (s - 0.13) / 0.045, 0.0); }
+float vaneWidth(float s) { float f = clamp((ARROW - 0.02 - s) / 0.3, 0.0, 1.0); return 0.095 * pow(sin(f * 3.1416), 0.5) * (1.0 - 0.4 * f); }
+float arrow(vec3 p, int i) {
+  if (uArrowShow[i] <= dots()) return 1e3;
+  vec3 l = inArrow(p, i);
+  float across = length(l.yz), far = max(across - 0.22, max(-l.x, l.x - ARROW) - 0.02);
+  if (far > 0.1) return far;   // nowhere near it
+  float d = max(across - 0.024, abs(l.x - ARROW * 0.5) - ARROW * 0.5);
+  if (uArrowGoo[i] > 0.0) {
+    // Once it has been through the fruit it carries goo with it, and a drip of that slowly lengthens under the shaft
+    vec3 from = uArrowTip[i] - uArrowDir[i] * 0.24;
+    d = min(d, rod(p, from, from - vec3(0.0, 0.03 + 0.07 * uArrowGoo[i], 0.0), 0.016, 0.022));
+  }
+  d = min(d, max(max(abs(l.y) - 0.016, abs(l.z) - headWidth(l.x)), abs(l.x - 0.09) - 0.09));
+  float w = vaneWidth(l.x), vanes = min(max(abs(l.z) - 0.012, abs(l.y) - w), max(abs(l.y) - 0.012, abs(l.z) - w));
+  return min(d, max(vanes, abs(l.x - (ARROW - 0.17)) - 0.15));
+}
+// Its colour at a place: an emerald head with pale cut edges, gold bindings, a dark green shaft, and feathers barred in two greens and edged with gold
+vec3 arrowAt(vec3 p, int i, float lit) {
+  vec3 l = inArrow(p, i), c; float s = l.x, across = length(l.yz);
+  // A little goo on it: a smear behind the head, and the drip
+  if (uArrowGoo[i] > 0.0 && (s < 0.26 + 0.04 * sin(atan(l.z, l.y) * 3.0 + float(i)) || (across > 0.03 && s > 0.19 && s < 0.4))) return uGlowCol * (lit > 0.3 ? 1.0 : 0.78);
+  // A brighter, yellower green than the fruit's jade, on a shaft that is nearly black, so the two don't run together
+  if (s < 0.18) c = across > headWidth(s) - 0.02 ? vec3(0.8, 1.0, 0.7) : l.z > 0.0 ? vec3(0.16, 0.86, 0.3) : vec3(0.0, 0.5, 0.16);
+  else if (s < 0.22 || abs(s - (ARROW - 0.35)) < 0.02 || s > ARROW - 0.035) c = GOLD[1];
+  else if (across < 0.035) c = vec3(0.04, 0.16, 0.09);
+  else c = across > vaneWidth(s) - 0.022 ? GOLD[1] : fract(s * 11.0 + across * 6.0) < 0.5 ? vec3(0.12, 0.8, 0.26) : vec3(0.0, 0.42, 0.14);
+  return c * (lit > 0.3 ? 1.0 : 0.72);
+}
+float map(vec3 p) { return min(min(min(chrysalis(toHang(p)), trunk(p)), min(twig(p), leaf(p))), min(arrow(p, 0), arrow(p, 1))); }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.016, -0.016);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.05;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 7.0 * d / min(t, 1.1));   // a shadow only gets so soft, however high the thing that throws it
+    t += clamp(d, 0.04, 0.18);
+    if (res < 0.01 || t > 2.2) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+int rung(float t, int top) { float x = clamp(t, 0.0, 1.0) * float(top); return min(int(x) + (fract(x) > dots() ? 1 : 0), top); }
+
+// The trunk's colour at a place: dark in the furrows and light on the ridges, and darker round the side that turns from the lamp
+// The goo is honeyed wine: deep red where it is thick and turned away, amber in the body, gold where the light comes
+// through its edges, and a white glint on top
+// A tone from a ramp in clean facets: flat, with dots only in a narrow seam between one tone and the next
+int facet(float t, int top) { float x = clamp(t, 0.0, 1.0) * float(top); return min(int(x) + (smoothstep(0.38, 0.62, fract(x)) > dots() ? 1 : 0), top); }
+vec3 gooTone(vec3 n, float lit, float rim) {
+  vec3 T[5] = vec3[5](mix(uGlowCol, vec3(0.38, 0.03, 0.12), 0.8), mix(uGlowCol, vec3(0.75, 0.14, 0.08), 0.55), uGlowCol, mix(uGlowCol, vec3(1.0, 0.95, 0.55), 0.55), vec3(1.0, 0.98, 0.88));
+  float glint = pow(max(dot(reflect(-uLight, n), -uFwd), 0.0), 24.0);
+  return T[facet(0.12 + lit * 0.5 + rim * 0.3 + glint * 0.6 + min(n.y, 0.0) * 0.25, 4)];
+}
+// Where the sun's gold lies. It is worked out from where the view rests, not where it has swayed to, so it stays put on the wood.
+float stillRim(vec3 n) { return pow(1.0 - max(dot(n, vec3(0.2823, 0.2955, 0.9127)), 0.0), 2.5); }
+bool gilded(vec3 n) { return stillRim(n) * clamp(dot(n, vec3(0.9553, 0.0, -0.2955)) + 0.2, 0.0, 1.0) > 0.4 + 0.3 * dots(); }
+vec3 barkAt(vec3 p, vec3 n, float lit, float rim) {
+  float r = ridge(p);
+  vec3 col = BARK[facet(lit * 0.7 + r * 0.38 - 0.06, 4)];
+  // Moss lies in the furrows in soft patches
+  float patchy = sin(p.y * 2.3 + 2.0 * sin(p.z * 3.0 + p.x)) + sin(p.y * 5.1 + p.z * 4.0);
+  if (r < 0.45 && patchy > 0.7 + 0.5 * dots()) col = mix(col, vec3(0.34, 0.4, 0.24), 0.3);
+  // And the low sun gilds the edge that turns towards it, faintly
+  if (gilded(n)) col = mix(col, vec3(1.0, 0.8, 0.45), 0.2);
+  return col;
+}
+
+// Beyond: the rest of the forest. Other great trunks standing off in the white air, each paler the farther it is,
+// with a lit side and a shaded one. Each is where it stands (x, z), its girth, and how pale it is.
+const vec4 FOREST[5] = vec4[5](vec4(-0.14, -3.5, 0.5, 0.7), vec4(-1.97, -5.0, 0.35, 0.79), vec4(-0.34, -5.5, 0.3, 0.82), vec4(-1.7, -6.5, 0.22, 0.87), vec4(-3.27, -7.5, 0.2, 0.91));
+// Tones in clean bands: flat colour, with dots only in a narrow seam where one band meets the next
+float banded(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps, f = fract(x); return min(floor(x) + (smoothstep(0.32, 0.68, f) > dots() ? 1.0 : 0.0), steps) / steps; }
+// It is kept quiet, the way distance is: the air is nearly white up high and a cool mist lower down, and the far trunks are
+// bare leaning silhouettes barely darker than it, ridged like ours, each with a lit side, all sinking into the mist below
+vec3 beyond(vec3 ro, vec3 rd, vec2 s) {
+  // The air: honey-gold where the low sun is, up and to the right, cooling through rose to a violet mist below
+  float sun = 1.0 - length((s - vec2(0.75, 0.95)) * vec2(0.55, 0.8));
+  vec3 air = mix(vec3(0.74, 0.76, 0.9), vec3(0.97, 0.9, 0.86), banded(s.y * 0.5 + 0.55, 3.0));
+  air = mix(air, vec3(1.0, 0.93, 0.7), 0.75 * banded(sun, 4.0));
+  // Shafts of that light slant down through the trees, drifting slowly
+  float shaft = sin((s.x * 0.9 + s.y * 0.6) * 9.0 + 1.5 * sin(s.y * 2.0) + uTurn * 6.2832);
+  air = mix(air, vec3(1.0, 0.96, 0.8), 0.22 * banded(smoothstep(0.2, 0.9, shaft) * clamp(sun + 0.5, 0.0, 1.0), 2.0));
+  float inv = inversesqrt(dot(rd.xz, rd.xz));
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i), r = FOREST[i].z;
+    float y = ro.y + rd.y * (5.0 - FOREST[i].y);   // roughly how high up it this ray passes it
+    vec2 oc = ro.xz - FOREST[i].xy;
+    float u = (oc.x * rd.z - oc.y * rd.x) * inv - 0.05 * y - 0.07 * sin(y * 1.4 + fi * 2.0);   // how far to one side of its middle; the lamp's side is the positive one, the sun's the negative
+    if (abs(u) > r * (1.0 + 0.08 * sin(y * 1.9 + fi) + 0.03 * sin(y * 6.3 + fi * 3.0))) continue;
+    // Bark like ours, in its own tones, ridged and rounded, with the sun gilding one edge; then the air takes most of it, more with distance and low down
+    vec3 wood = BARK[facet(0.2 + 0.4 * smoothstep(-0.6, 0.5, u / r) + 0.25 * sin(u / r * 7.0 + 1.5 * sin(y * 1.1 + fi)), 3)];
+    if (u / r < -0.78) wood = mix(wood, vec3(1.0, 0.85, 0.55), 0.6);
+    return mix(wood, air, clamp(FOREST[i].w - 0.12 + 0.3 * banded(0.35 - s.y * 0.8, 3.0), 0.0, 1.0));
+  }
+  return air;
+}
+
+void main() {
+  vec2 s =(gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tHit = -1.0, t = 0.0;
+  for (int i = 0; i < 120 && t < 11.0; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.003) { tHit = t; break; }
+    t += d * 0.6;   // the ribbons are too thin to trust a full step
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p), q = toHang(p);
+    float lit = max(dot(n, uLight), 0.0) * lightAt(p + n * 0.03);
+    float rim = pow(1.0 - max(dot(n, -uFwd), 0.0), 2.5);
+    float dc = chrysalis(q) / (1.0 + uStretch), dt = twig(p), dl = leaf(p), dtr = trunk(p);
+    float d0 = arrow(p, 0), d1 = arrow(p, 1);
+    if (min(d0, d1) < min(min(dtr, dc), min(dt, dl))) col = arrowAt(p, d0 < d1 ? 0 : 1, lit);
+    else if (dtr < min(dc, min(dt, dl))) col = barkAt(p, n, lit, rim);
+    else if (dc < min(dt, dl)) {
+      // Jade, lit a little from inside as the glow swells
+      // Wine-dark and glossy: every bead catches its own glint, and the pale bloom shows only where the lamp is full on it
+      col = rind(facet(0.1 + lit * 0.6 + rim * 0.32 + pow(max(dot(reflect(-uLight, n), -uFwd), 0.0), 14.0) * 0.8, 4));
+      // Over its shoulders, a calyx of dusky vine-green sepals, and the stem it hangs by
+      if (q.y > -0.2 + 0.035 * abs(sin(atan(q.z, q.x) * 3.0))) col = LEAF[rung(0.1 + lit * 0.8 + rim * 0.2, 2)] * vec3(0.72, 0.8, 0.55);
+      vec3 at = q; q = unsprung(at);
+      float ang = atan(q.z, q.x), strand = strandAt(q);
+      vec2 pt = parted(q);
+      bool onBody = pt.y > 0.0 && pt.y < 1.0;
+      // Gold studs round the ridge
+      if (abs(q.y + 0.25) < 0.04 && sin(ang * 6.0) > 0.0) col = GOLD[lit + rim * 0.5 > 0.3 ? 1 : 0];
+      // The crack: those same lines go white and wide from the top down. When it has drawn shut the seam is still hot, and cools back to a line.
+      // The crack: the seam weeps a thin line of goo from the top down, which dries away once it has shut again
+      if (onBody && pt.y < uCrack && strand < 0.07 && uHeat > dots()) col = lit > 0.3 ? uGlowCol : uGlowCol * 0.8;
+      // The wound the first arrow left in its side: a dark slit welling with goo, and a dribble running down from it
+      float da = ang - 0.6, gash = abs(q.y + 0.62 - 0.25 * da);
+      if (uMark > 0.0 && abs(da) < 0.45) {
+        if (gash < 0.04 * min(1.0, uMark * 4.0)) col = gash < 0.014 ? rind(0) : lit > 0.3 ? uGlowCol : uGlowCol * 0.8;
+        else if (abs(da - 0.05) < 0.14 && q.y < -0.62 && q.y > -0.66 - 0.2 * uMark) col = lit > 0.3 ? uGlowCol : uGlowCol * 0.8;
+      }
+      // Where it has parted, the edge of each ribbon is a clean pale line, and the hollow inside is washed with the light
+      if (pt.x > 0.05 && strand < uGap * pt.x + 0.06) col = rind(4);
+      if (uOrb > 0.0 && shell(q, pt.x) < -0.025) col = rind(lit > 0.3 ? 1 : 0);   // where the goo has gone, the hollow inside is dark
+      // The light itself: a white heart, ringed so it shows against the page
+      // The ooze: white where the lamp is on it, the colour of the magic in its shade, darker on its underside so it shows against the page
+      if (oozeAt(q, pt.x, shell(q, pt.x)) < 0.012) col = gooTone(n, lit, rim);
+      // The goo is the same stuff as the ooze, and is shaded the same
+      if (goo(at) < 0.012) col = gooTone(n, lit, rim);
+    } else if (dl < dt) col = LEAF[rung(0.15 + lit * 0.8 + rim * 0.2, 2)];
+    else {
+      // The branch, gilded along the edge that turns to the sun like the trunk
+      col = WOOD[facet(lit * 0.85 + stillRim(n) * 0.25, 2)];
+      if (gilded(n)) col = mix(col, vec3(1.0, 0.8, 0.45), 0.2);
+    }
+    // Depth: the creases where things meet are dark, and what is further off is taken a little by the mist
+    if (clamp(0.5 + 0.5 * map(p + n * 0.09) / 0.09, 0.0, 1.0) < 0.42 + 0.16 * dots()) col *= 0.66;
+    if (smoothstep(5.3, 7.2, tHit) > 0.25 + 0.5 * dots()) col = mix(col, vec3(0.8, 0.8, 0.92), 0.35);
+  } else col = beyond(ro, rd, s);
+  // The grade, over everything: more bite between light and dark, and a little richer
+  col = mix(col, col * col * (3.0 - 2.0 * col), uGrade);
+  col = clamp(mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 1.15), 0.0, 1.0);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.05 }, uGlowCol: { value: V() },
+  uSwing: { value: new THREE.Vector2() }, uFruit: { value: V(0.36, 0.11, 0.28) }, uBeads: { value: 1 }, uGrade: { value: 0.55 }, uPulse: { value: 0 }, uTurn: { value: 0 },
+  uOpen: { value: 0 }, uCrack: { value: 0 }, uHeat: { value: 1 }, uGap: { value: 0 }, uOrb: { value: 0 }, uStretch: { value: 0 }, uSlack: { value: 1 },
+  uTwig: { value: Array.from({ length: 6 }, () => V()) }, uHang: { value: V() }, uLeaf: { value: new THREE.Vector4() }, 
+  uOoze: { value: 0 }, uBite: { value: 0 },
+  uArrowTip: { value: [V(), V()] }, uArrowDir: { value: [V(1, 0, 0), V(1, 0, 0)] }, uArrowShow: { value: V() }, uMark: { value: 0 }, uArrowGoo: { value: new THREE.Vector2() },
+  uDollop: { value: Array.from({ length: 3 }, () => new THREE.Vector4()) }, uLevel: { value: 0 }, uPlump: { value: 1 }, uWell: { value: 0 }, uInflate: { value: -0.8 }, uBelly: { value: 0 }, uPuff: { value: 1 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(-0.5, 1.0, 0) }, uLight: { value: V() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(1.25, 1.35 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.3 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.1, 0.9);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Everything is a function of the time in the loop and nothing else, so the last frame meets the first
+// The parts of the story; drag their ends on the timeline to make one last longer
+const S = sections({ hanging: 1, graze: 1.4, strike: 0.8, open: 0.8, drain: 2.3, close: 0.8, refill: 2.9 });
+const EASE = {
+  lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5, back: x => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2,
+};
+// A track is a list of [when, pose, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i], k = EASE[how]((t - t0) / (t1 - t0));
+    return typeof a === 'number' ? a + (b - a) * k : a.map((v, i) => v + (b[i] - v) * k);
+  }
+  return track[track.length - 1][1];
+}
+const bump = (t, at, len) => t > at && t < at + len ? Math.sin((t - at) / len * Math.PI) : 0;
+const KICK = 2.6;            // when the second arrow, having gone through it, strikes the trunk, and it cracks
+// The two arrows, shot from off to the right and below. Each goes straight through the chrysalis and into the trunk, where it sticks
+// and quivers. The first leaves a gash and the start of the spiral; the second finishes it.
+const SHOT1 = [1.2, 1.36], GRAZE = 1.3;   // when the first is in the air, and when it goes through
+const A1 = [[2.53, -0.05, -0.59], [-1.57, 1.29, 0.48]];   // from where to where
+const SHOT2 = [2.46, KICK], A2 = [[2.4, -1.0, 0.9], [-1.2, 1.98, -0.48]];   // when the second is in the air, and from where to where
+const GONE = [9.0, 9.7];     // when the stuck arrow fades away, so the loop can begin again
+const FOLLOW = [[0, 0], [3.0, 0], [6.4, 1, 'io'], [9.9, 0, 'io']];   // how far the view has sunk after the goo
+// The goo it is full of. Once open it lets go of it in three great dollops, and is left shrunken; after it has shut it swells back.
+// Getting back to normal, in steps: wound shut it is drawn tight and thin; it holds like that; then it pumps itself full
+// in three gulps, each pushing a fat ring further down the body, the last one out through the tip
+// (the gulps start the moment it has wound shut and run into one another: each surges, then barely eases before the next)
+const PUMPS = [7.08, 7.33, 7.58, 7.83];
+const INFLATE = [[0, -0.8], [PUMPS[0] - 0.01, -0.8], [PUMPS[0], -0.3], [8.9, 1.7, 'lin']];   // the filling runs steadily down it; the rows of beads are what make it go in steps
+// With the last gulp it is a touch too full, and settles
+const PUFF = [[0, 1], [PUMPS[3], 1], [PUMPS[3] + 0.2, 1.05, 'out'], [PUMPS[3] + 0.4, 0.985], [PUMPS[3] + 0.6, 1.01], [PUMPS[3] + 0.75, 1]];
+const WELLING = [[0, 0], [2.7, 0], [3.1, 0.45, 'out'], [4.2, 1, 'io'], [7.05, 1]];   // how far it has welled out through the gaps
+const BELLY = [[0, 0], [3.1, 0], [5.0, 1, 'io'], [5.3, 1], [6.3, 0.55, 'io'], [7.0, 0, 'in']];   // the mass hanging under the coil: it gathers, pours itself smaller, and the last of it is let go as the coil winds shut
+const FLOW = [[0, 0], [2.85, 0], [2.9, 0.1], [4.6, 0.8, 'io'], [5.2, 0.8], [6.4, 0.3], [6.41, 0]];   // a trickle at first, building as more of it has run down   // how freely it is running: hard at first, slackening, stopped once it has refilled a little
+const POUR = [2.9, 3.4, 3.9];                                             // when each dollop starts to sag out
+const LEVEL = [[0, -0.25], [3.0, -0.25], [6.2, -0.72, 'io']];                        // how high the goo still stands inside
+const PLUMP = [[0, 1], [3.0, 1], [6.3, 0.82, 'io'], [6.8, 0.82], [7.05, 0.74, 'out']]; // how plump the shell is
+const CRACK = [[0, 0], [GRAZE, 0], [GRAZE + 0.2, 0.4, 'out'], [KICK, 0.4], [2.72, 1, 'out']];  // how far down the winding lines have cracked
+// How far down they have parted. Reluctant, like peel coming off an orange: it gives a little at the top, sticks, gives some more, sticks, then lets go
+const OPEN  = [[0, 0], [2.66, 0], [2.9, 0.7, 'snap'], [3.15, 0.74], [3.45, 1.3, 'out']];   // now it bursts: most of the way at the hit, a catch, then the rest
+// How far the parted ribbons have dropped, unwinding as they go: in the same fits and starts, then a slow sag and a small settle.
+// To close, the coil gathers, snaps back up as a spring does, and rebounds once
+const DROP  = [[0, 0], [2.72, 0], [3.0, 0.55, 'back'], [3.2, 0.5], [3.6, 1.08, 'out'], [3.8, 0.94], [4.0, 1],
+  [6.3, 1], [6.45, 1.08, 'out'], [6.8, 0, 'in'], [6.92, 0.1, 'out'], [7.05, 0, 'in']];
+const GAP   = [[0, 1], [6.4, 1], [6.8, 0.3, 'in'], [7.05, 0, 'out']];                         // how slack the coil is: the gaps close and the swelling goes as it draws tight
+const HEAT  = [[0, 1], [7.05, 1], [7.7, 0, 'lin']];                                          // how hot the seam glows: white where it has just shut, cooling to a line
+// How much light is out: it swells as the shell opens, and is shut in at the end
+const WILD  = [[0, 0], [2.66, 0], [3.3, 1, 'io'], [9.45, 1], [9.5, 0, 'lin']];
+const SHUT = 6.8;           // when it snaps shut and the twig is jolted again
+
+// The twig at rest with nothing on it, from where it leaves the trunk outwards, and how much of the bend each joint has taken by then
+const TWIG = [[-1.3, 0.95, -0.05], [-0.9, 1.08, -0.05], [-0.55, 1.34, 0], [-0.2, 1.56, 0], [0.05, 1.53, 0], [0.24, 1.46, 0]];
+const GIVE = [0.1, 0.3, 0.6, 0.85, 1];
+const POP = 3.5;            // when the peel finally lets go and the twig feels it
+const P = params({
+  sway: [0.5, 0, 1],         // how far it swings on its thread when nothing has hit it
+  colour: '#5cf0ff',         // the colour of the goo
+  fruit: '#5c1c47',          // the colour of the fruit
+  beads: [1, 0, 1.6],        // how fat the beads of its skin are
+  pour: [1, 0.4, 1.5],       // how much goo comes out of it
+  impact: [1, 0, 1.5],       // how hard the arrows knock it about
+  orbit: [1, 0, 2],          // how far the view turns over the loop
+  jolt: [1, 0, 2],           // how far the view jumps when an arrow is shot
+  contrast: [0.55, 0, 1],    // how much bite there is between light and dark
+});
+// The ooze has to end the loop as it began. So it is never quite gone: it wells out slowly from the crack until the shell shuts,
+// stays on the outside, and then dries back very slowly, all through the quiet after and before, to what it was when it last cracked.
+// None while it is shut and whole. It wells out while it is open and stays on the outside when it shuts; then each gulp of the
+// refilling draws in the ooze from the part it fills, and the last of it thins away with the last gulp.
+const OOZE = [[0, 0], [2.8, 0], [6.8, 1, 'io'], [9.3, 1], [9.31, 0]];   // (by then the refilling has long since pushed it all off)
+const oozed = t => key(OOZE, t);
+const THROUGH = 2.55;        // when the second arrow goes through it
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  // The story runs on written time; whatever carries on through a hold goes by the real loop
+  const t = S.written(now), lap = S.round(now), round = lap * Math.PI * 2, U = uniforms;
+  const wild = key(WILD, t);
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  // The view turns gently all through the scene, round one way and back, rising and dipping a little as it goes.
+  // Each arrow gives it a small jump further round and up, which eases off again.
+  const nudge = at => { const since = t - at; return since > 0 && since < 4 ? (1 - Math.exp(-14 * since)) * Math.exp(-1.3 * since) * (1 - since / 4) : 0; };
+  const jumps = nudge(SHOT1[0]) + 2.6 * nudge(SHOT2[0]);   // the second, the one that bursts it, throws the view much further
+  // While the goo runs down the view tilts to look over and down at it, sinking only a touch; as the fruit refills it eases back
+  const follow = key(FOLLOW, t);
+  U.uTarget.value.y = 1 - 0.04 * follow;
+  const yaw = 0.3 - 0.2 * P.orbit * Math.cos(round) + 0.07 * P.jolt * jumps + view.yaw;
+  const pitch = view.pitch + 0.06 * P.orbit * Math.sin(round + 0.8) + 0.055 * P.jolt * jumps + 0.13 * follow;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  // (but it does not swing with the slow sway of the view, or every colour on the tree would shift as it turned)
+  const still = 0.3 + view.yaw;
+  U.uLight.value.set(Math.sin(still) * 0.45 - 0.5 * Math.cos(still), 0.8, Math.cos(still) * 0.45 + 0.5 * Math.sin(still)).normalize();
+
+  // It swings twice a loop. Something inside wriggles now and then. The kick that cracks it rattles it and sets it swinging harder for a while.
+  // Nothing shakes it but the arrows. Each one knocks it hard the way the arrow was going: it is flung out on its thread, rattles,
+  // and swings back and forth, round and round, until that dies away
+  const knock = (at, amp, decay, freq) => { const since = t - at; return since > 0 && since < 5 ? amp * P.impact * Math.exp(-decay * since) * Math.sin(freq * since) * (1 - since / 5) : 0; };
+  const kt = t - KICK, kicked = kt > 0 && kt < 2.5 ? 1 - kt / 2.5 : 0;
+  const shake = knock(GRAZE, 0.07, 7, 48) + knock(THROUGH, 0.09, 7, 48);
+  const swing = 0.36 * P.sway * Math.sin(round * 2) + knock(GRAZE, 0.8, 1.4, 7.5) + knock(THROUGH, 1.05, 1.2, 7.5);
+  const swingZ = 0.16 * P.sway * Math.cos(round * 2) + knock(GRAZE, 0.22, 1.4, 6.6) + knock(THROUGH, -0.3, 1.2, 6.6);
+  U.uSwing.value.set(swing + shake, swingZ);
+  U.uCrack.value = key(CRACK, t);
+  U.uOpen.value = key(OPEN, t);
+  U.uHeat.value = key(HEAT, t);
+  // Once open, the gaps breathe a little so it is not frozen through a hold
+  U.uGap.value = 0.33 * (1 + 0.06 * Math.sin(round * 6));
+  U.uSlack.value = key(GAP, t);
+  U.uOrb.value = 0.15 * Math.max(0, wild);
+  // The ribbons drop like a slack spring, bounce on the jolt, and bob a little while they hang
+  const j = t - POP, k = t - SHUT;
+  const jolt = (j > 0 && j < 3.1 ? 0.5 * Math.exp(-2.5 * j) * Math.sin(j * 13) * (1 - j / 3.1) : 0) - (k > 0 && k < 0.8 ? 0.7 * Math.exp(-4 * k) * Math.sin(k * 15) * (1 - k / 0.8) : 0);
+  const drop = key(DROP, t);
+  U.uStretch.value = Math.max(0, 0.65 * drop * (1 + 0.05 * Math.sin(round * 6) + 0.25 * jolt));
+
+  // The twig carries the weight. It sags under it; it dips twice a swing, because the thread pulls hardest as the chrysalis
+  // passes through the bottom; it is drawn towards whichever side the chrysalis is on; it trembles with the shaking; and
+  // the jolt of the opening sets it bouncing until that dies away. The kick from inside bounces it too.
+  const bend = 0.16 + 0.03 * (2 * P.sway) ** 2 * Math.cos(round * 4) - 0.18 * swing - 0.5 * shake + 0.06 * jolt
+    + 0.09 * kicked * Math.exp(-3 * kt) * Math.sin(kt * 16 + 0.6) + knock(GRAZE, 0.07, 3, 16)
+    + PUMPS.reduce((sum, at) => sum + knock(at, 0.018, 9, 26) * Math.max(0, 1 - (t - at) / 0.45), 0);   // each gulp tugs the branch, and is still again before the loop ends
+  let x = TWIG[0][0], y = TWIG[0][1], z = TWIG[0][2], c = 1, s = 0;
+  U.uTwig.value[0].set(x, y, z);
+  for (let i = 0; i < 5; i++) {
+    const dx = TWIG[i + 1][0] - TWIG[i][0], dy = TWIG[i + 1][1] - TWIG[i][1];
+    c = Math.cos(bend * GIVE[i]); s = Math.sin(bend * GIVE[i]);
+    x += dx * c + dy * s; y += dy * c - dx * s; z = TWIG[i + 1][2] - 0.3 * swingZ * GIVE[i];
+    U.uTwig.value[i + 1].set(x, y, z);
+    if (i === 3) U.uHang.value.set(x - 0.05 * c - 0.03 * s, y - 0.03 * c + 0.05 * s, z);   // the thread is tied just under the last joint but one
+  }
+  U.uLeaf.value.set(x + 0.13 * c - 0.02 * s, y - 0.02 * c - 0.13 * s, z, bend);
+
+  // The magic: it swells and the lines wind down a few times a loop, and all of it is stronger while things are wild
+  const tint = P.fruit;
+  U.uFruit.value.set(parseInt(tint.slice(1, 3), 16) / 255, parseInt(tint.slice(3, 5), 16) / 255, parseInt(tint.slice(5, 7), 16) / 255);
+  U.uBeads.value = P.beads;
+  U.uGrade.value = P.contrast;
+  U.uPulse.value = 0.5 + 0.5 * Math.sin(round * 4);
+  U.uTurn.value = lap * 2;
+  const hex = P.colour;
+  U.uGlowCol.value.set(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
+
+
+  // Each arrow flies straight to the trunk, where its tail quivers until it is still; both fade away near the end
+  const gone = 1 - clamp((t - GONE[0]) / (GONE[1] - GONE[0]), 0, 1);
+  [[SHOT1, A1], [SHOT2, A2]].forEach(([shot, [from, to]], i) => {
+    const u = clamp((t - shot[0]) / (shot[1] - shot[0]), 0, 1), since = t - shot[1];
+    const quiver = since > 0 && since < 1.5 ? 0.15 * Math.exp(-4 * since) * Math.sin(since * 42) * (1 - since / 1.5) : 0;
+    const way = to.map((e, n) => e - from[n]), far = Math.hypot(...way);
+    U.uArrowTip.value[i].set(...from.map((s0, n) => s0 + way[n] * u));
+    U.uArrowDir.value[i].set(way[0] / far, way[1] / far + quiver, way[2] / far).normalize();
+    U.uArrowShow.value.setComponent(i, t < shot[0] ? 0 : gone);
+    U.uArrowGoo.value.setComponent(i, clamp((t - [GRAZE, THROUGH][i]) / 1.5, 0, 1));
+  });
+
+  U.uMark.value = t > GRAZE && t < 2.75 ? Math.min(1, (t - GRAZE) / 0.9) : 0;   // the wound weeps until the second arrow bursts the fruit open
+
+  // The pour: the goo sags out of the bottom behind a fat front, runs in one stream that thins as the fruit empties, and its tail drops away.
+  // The stream is where it leaves, where it has got to, how thick it is, and how fat its front is.
+  // Each drip is how low its bead is, how low its rope reaches, how big the bead is, and how thick the rope
+  // They keep coming, one every half second, each as big as the flow was when it started: through the fruit's first try at
+  // closing, through its shutting, and on into its refilling
+  // Nothing fades: a drip's rope necks and snaps, the drop falls clean out of the picture, and what is left of the rope springs
+  // back up into the belly it came from.
+  U.uBelly.value = key(BELLY, t) * P.pour;
+  U.uDollop.value.forEach((d, i) => {
+    const turn = (t - POUR[i]) / 1.5, a = (turn - Math.floor(turn)) * 1.5, flow = turn < 0 ? 0 : key(FLOW, t - a);
+    const size = (0.022 + 0.042 * flow - 0.005 * i) * P.pour, rope = (0.018 + 0.04 * flow) * P.pour, top = -0.4 - 0.5 * (1 + U.uStretch.value);
+    if (flow <= 0) d.set(top, top, 0, 0);
+    else if (a < 0.95) { const f = a / 0.95, bead = top - 0.12 - 0.6 * f * f; d.set(bead, bead, size * Math.min(1, a / 0.3), rope * (1 - 0.35 * f)); }
+    else { const f = (a - 0.95) / 0.55, back = Math.min(1, f * 2.2); d.set(top - 0.72 - 3 * f * f, top - 0.02 - 0.7 * (1 - back) ** 2, size, rope * 0.65 * Math.sqrt(1 - back)); }
+  });
+  U.uWell.value = key(WELLING, t) * P.pour;
+  U.uLevel.value = key(LEVEL, t);
+  U.uPlump.value = key(PLUMP, t);
+  U.uInflate.value = key(INFLATE, t);
+  U.uPuff.value = key(PUFF, t);
+
+  U.uOoze.value = 0.5 * oozed(t);
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>
