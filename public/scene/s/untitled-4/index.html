@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1794608160829;window.__values={"wave":0.3,"colour":"#d8261c","trim":"#f2b432"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795439846707;window.__values={"wave":0.3,"eyeColour":"#e0f252"};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
 (() => {
   const errors = window.__errors = [];
   const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
@@ -43,7 +43,7 @@ const N = 16;
 const frag = /* glsl */`
 precision highp float;
 uniform vec2 uRes;
-uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uTone, uTrim;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uTone, uTrim, uEye;
 uniform vec4 uSeg[${N}];          // the spine of the body: centre, and how thick
 uniform vec3 uHead, uHF, uHU, uHS; // where the head is, and which way it faces
 uniform vec4 uLeg;                 // how far each leg has swung
@@ -166,7 +166,7 @@ void main() {
     if (mat > 1.5) {
       // Gold eye, black pupil looking ahead
       vec3 d = p - uHead, hq = vec3(dot(d, uHF), dot(d, uHU), abs(dot(d, uHS))) / HEAD;
-      base = dot(normalize(hq - EYE), normalize(vec3(0.6, 0.1, 0.8))) > 0.8 ? vec3(0.08) : uTrim;
+      base = dot(normalize(hq - EYE), normalize(vec3(0.6, 0.1, 0.8))) > 0.8 ? vec3(0.08) : uEye;
       glow = 0.5 + 0.5 * glow;
     } else if (mat > 0.5) base = uTrim;
     else {
@@ -200,7 +200,7 @@ const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
 renderer.setPixelRatio(1);
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const uniforms = {
-  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.1 }, uTone: { value: new THREE.Color() }, uTrim: { value: new THREE.Color() },
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1.1 }, uTone: { value: new THREE.Color() }, uTrim: { value: new THREE.Color() }, uEye: { value: new THREE.Color() },
   uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0.15, 0.45, 0) }, uLight: { value: V() },
   uSeg: { value: Array.from({ length: N }, () => new THREE.Vector4()) },
   uHead: { value: V() }, uHF: { value: V() }, uHU: { value: V() }, uHS: { value: V() },
@@ -245,6 +245,7 @@ const P = params({
   wave: [0.17, 0, 0.3],     // how deep the ripple down the body is
   colour: '#d8261c',         // the scales
   trim: '#f2b432',           // antlers, mane, crest, claws and belly
+  eyeColour: '#f2b432',      // the eyes, round the black pupil
 });
 
 const up = V(0, 1, 0), tmp = V();
@@ -280,6 +281,7 @@ function frame(now) {
 
   U.uTone.value.set(P.colour);
   U.uTrim.value.set(P.trim);
+  U.uEye.value.set(P.eyeColour);
   renderer.render(scene, camera);
 }
 loop(LOOP, frame);

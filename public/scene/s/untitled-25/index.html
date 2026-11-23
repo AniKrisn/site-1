@@ -1,0 +1,389 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795383782947;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Match</title>
+<style>
+  /* Layout: a black page with one thing on it, drawn in chunky pixels. */
+  :root { --bg: #000000; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A ten second loop on a black page. A wooden match held upright strikes, flares and burns, its stick blackening and curling, while tiny planets come out of the dark and circle the flame. The flame gutters, the planets go dark one by one, a thread of smoke rises, and it strikes again."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const TOP = 1.0;   // top of the stick, where the head sits
+
+// Nothing here is a mesh: every pixel walks a ray to the match, meets the planets exactly, and paints the flame in the flat
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uKey;
+uniform float uSpan, uPix;
+uniform vec3 uShift;                  // the match, nudged by the strike
+uniform float uFront, uCurl, uChar, uEmber;
+uniform float uGlow, uBurst, uFlameH, uFlameW;
+uniform vec3 uBase, uLamp;            // root of the flame, and the middle of its light
+uniform vec4 uFlick;                  // lean of the tip, ripple, phase, flutter of the width
+uniform vec4 uPlanet[3];              // where each planet is, and how much of the flame's light reaches it
+uniform vec4 uSmoke;                  // top of the thread, its tail, how much is left, phase of its waver
+uniform vec4 uSpark[6];               // where each spark is, and how bright
+uniform vec3 uTrail[6];               // and where its streak ends
+
+const vec3 WOOD[5] = vec3[5](vec3(0.07, 0.04, 0.025), vec3(0.24, 0.135, 0.07), vec3(0.47, 0.3, 0.16), vec3(0.72, 0.52, 0.3), vec3(0.93, 0.77, 0.51));
+const vec3 CHAR[4] = vec3[4](vec3(0.015, 0.012, 0.012), vec3(0.06, 0.05, 0.05), vec3(0.14, 0.12, 0.115), vec3(0.28, 0.25, 0.23));
+const vec3 HEAD[4] = vec3[4](vec3(0.08, 0.015, 0.015), vec3(0.3, 0.05, 0.04), vec3(0.55, 0.1, 0.07), vec3(0.8, 0.26, 0.15));
+const vec3 EMBER[3] = vec3[3](vec3(0.45, 0.06, 0.02), vec3(0.86, 0.26, 0.05), vec3(1.0, 0.62, 0.22));
+const vec3 FLAME[5] = vec3[5](vec3(0.62, 0.13, 0.03), vec3(0.94, 0.39, 0.07), vec3(1.0, 0.63, 0.17), vec3(1.0, 0.85, 0.44), vec3(1.0, 0.97, 0.83));
+const vec3 BLUE[3] = vec3[3](vec3(0.08, 0.1, 0.36), vec3(0.18, 0.3, 0.8), vec3(0.46, 0.63, 1.0));
+const vec3 HALO[3] = vec3[3](vec3(0.035, 0.013, 0.006), vec3(0.07, 0.026, 0.011), vec3(0.13, 0.05, 0.019));
+const vec3 SMOKE[2] = vec3[2](vec3(0.08, 0.076, 0.076), vec3(0.18, 0.168, 0.165));
+const vec3 WARM = vec3(1.0, 0.84, 0.6);                                   // the colour of the flame's light on things
+const float PR[3] = float[3](0.024, 0.038, 0.03);                          // how big each planet is
+const float LEVEL[4] = float[4](0.0, 0.28, 0.62, 1.0);                     // how a planet steps from dark to lit
+const vec3 RING =vec3(0.34, 1.0, -0.22);                                  // which way the ringed one's rings face
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+const float TOP = 1.0;      // top of the stick, where the head sits
+const float HALF = 0.026;   // half the stick's thickness
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rbox(vec3 p, vec3 b, float r) { vec3 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r; }
+
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+int rung(float t, int n) { float x = clamp(t, 0.0, 1.0) * float(n - 1); return min(int(x) + (fract(x) > dots() ? 1 : 0), n - 1); }
+// Clean bands for big soft areas: flat, with dots only in a narrow seam
+int band(float t, int n) { float x = clamp(t, 0.0, 1.0) * float(n - 1), f = fract(x); return min(int(x) + (smoothstep(0.32, 0.68, f) > dots() ? 1 : 0), n - 1); }
+
+// The thing: the match. Above the burn the stick curls over, so a point is first carried back into the straight stick.
+vec3 unbend(vec3 p) {
+  p -= uShift;
+  float a = uCurl * max(p.y - uFront, 0.0), c = cos(a), s = sin(a);
+  vec2 r = vec2(p.x, p.y - uFront);
+  r = vec2(c * r.x - s * r.y, s * r.x + c * r.y);
+  return vec3(r.x, r.y + uFront, p.z);
+}
+float stick(vec3 q) {
+  float w = HALF * (1.0 - 0.24 * smoothstep(uFront - 0.01, uFront + 0.05, q.y));   // charcoal is thinner than wood
+  float d = rbox(q - vec3(0.0, (TOP - 0.6) * 0.5, 0.0), vec3(w, (TOP + 0.6) * 0.5, w), 0.007);
+  return d - (noise(q * 70.0) - 0.5) * 0.005 * smoothstep(uFront - 0.02, uFront + 0.03, q.y);
+}
+float head(vec3 q) {
+  float d = egg(q, vec3(0.0, TOP + 0.03, 0.0), vec3(0.043, 0.062, 0.041));
+  return d - (noise(q * 42.0) - 0.5) * (0.006 + 0.012 * uChar);   // a dipped blob, crustier as it chars
+}
+float map(vec3 p) { vec3 q = unbend(p); return smin(stick(q), head(q), 0.018); }
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.003, -0.003);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+
+// Wood, scorch, charcoal, the dipped head and the embers, lit only by the flame
+vec3 matchColour(vec3 p, vec3 n) {
+  vec3 q = unbend(p), toL = uLamp - p;
+  float dist = length(toL); vec3 L = toL / dist;
+  float near = 1.0 / (1.0 + 18.0 * dist * dist);
+  float lit = min(uGlow, 1.6) * near * (0.6 * max(dot(n, L), 0.0) + 0.3 + 0.4 * max(dot(n, uKey), 0.0)) * 1.7;
+  lit += uEmber * (1.0 - min(uGlow, 1.0)) * 0.45 * exp(-abs(unbend(p).y - uFront) / 0.05);   // once the flame is out, the ember lights the tip
+
+  float hd = head(q), sd = stick(q);
+  float burnt = smoothstep(uFront - 0.08, uFront + 0.01, q.y + (noise(q * vec3(60.0, 18.0, 60.0)) - 0.5) * 0.035);
+  float grain = noise(vec3(q.x * 110.0 + q.z * 40.0, q.y * 4.0, q.z * 110.0));
+  vec3 col;
+  if (hd < sd + 0.003) {
+    float charred = uChar * 1.3 - noise(q * 50.0) * 0.45 - 0.1;
+    col = charred > dots() * 0.5 ? CHAR[rung(lit * 0.6, 4)] : HEAD[rung(lit * 0.9, 4)];
+  } else if (burnt > 0.55 + 0.4 * dots()) {
+    col = CHAR[rung(lit * 0.55, 4)];
+  } else {
+    col = WOOD[rung((lit + (grain - 0.5) * 0.16) * (1.0 - 0.75 * smoothstep(0.0, 0.6, burnt)), 5)];
+  }
+  // Embers: a glowing seam where the wood turns to charcoal, and sparks of it in the char above
+  float seam = exp(-abs(q.y - uFront - 0.004) / 0.013) * (0.5 + 0.7 * noise(q * 50.0));
+  float spots = step(0.74, noise(q * 45.0)) * smoothstep(uFront, uFront + 0.02, q.y) * (1.0 - smoothstep(uFront + 0.04, uFront + 0.09, q.y)) * 0.7;
+  float e = uEmber * (seam + spots);
+  if (lit < 0.03 + 0.07 * dots()) col = vec3(0.0);   // where the flame's light doesn't reach, the dark has it
+
+  if (e > 0.3 + 0.25 * dots()) col = EMBER[rung((e - 0.3) / 0.7, 3)];
+  return col;
+}
+
+// The flame, painted in the flat through its light: f is across and up from its root. a is 0 where there is none,
+// 1 in its bright shell, and 0.5 in the clear kernel at its root, where the head shows through
+vec4 flame(vec2 f) {
+  float H = uFlameH, W = uFlameW;
+  if (uGlow < 0.01 || H < 0.005) return vec4(0.0);
+  float y = f.y / H;
+  if (y < -0.22 || y > 1.0) return vec4(0.0);
+  float ph = uFlick.z;
+  float lean = uFlick.x * y * y + uFlick.y * sin(y * 6.0 - ph) * y;
+  float x = f.x / W - lean;
+  // Round at the root, widest a fifth of the way up, drawn out to a point
+  float w = y < 0.2 ? sqrt(max(0.0, 1.0 - pow((0.2 - y) / 0.42, 2.0))) : pow((1.0 - y) / 0.8, 0.8);
+  w *= (1.0 + uBurst * 0.7 * (1.0 - y)) * uFlick.w;
+  float rag = (noise(vec3(f * vec2(60.0, 24.0) + vec2(0.0, -2.0 * sin(ph)), 2.0 * cos(ph))) - 0.5) * (0.14 + 0.6 * uBurst);
+  float r = abs(x) / max(w, 1e-3) + rag * (y + uBurst);
+  if (r > 1.0) return vec4(0.0);
+  // The root burns blue, a thin cup round the head; it takes over as the flame dies
+  float dying = 1.0 - min(uGlow, 1.0);
+  float cup = smoothstep(0.14 + 0.4 * dying, -0.08, y) * smoothstep(0.35, 0.8, r + 0.5 * dying) * (1.0 - uBurst);
+  float kernel = (y < 0.42 && r < 0.66 - 0.6 * max(y, 0.0)) ? 0.5 : 1.0;
+  if (cup > dots()) return vec4(BLUE[rung(1.25 - r, 3)], kernel);
+  // Hottest in a core a third of the way up, cooling to the rim and the tip
+  float rise = smoothstep(-0.22, 0.32, y) * (1.0 - 0.6 * smoothstep(0.45, 1.0, y));
+  float heat = pow(1.0 - r, 0.5) * rise * (0.75 + 0.3 * min(uGlow, 1.5)) + uBurst * 0.5;
+  return vec4(FLAME[rung(heat, 5)], kernel);
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(0.0);
+  float best = 1e9;
+
+  // Beyond: nothing, only the dark, warmed a little round the flame
+  float tFlame = dot(uLamp - ro, rd);
+  vec3 fp = ro + rd * tFlame - uBase;
+  vec2 f = vec2(dot(fp, uRight), dot(fp, uUp));
+  float halo = min(uGlow, 1.6) * exp(-length((f - vec2(0.0, uFlameH * 0.4)) * vec2(1.0, 0.75)) / 0.11);
+  int h = band(halo * 1.6 - 0.1, 4);
+  if (h > 0) col = HALO[h - 1];
+
+  // The thread of smoke, rising from where the flame was
+  if (uSmoke.z > 0.0 && f.y > uSmoke.y && f.y < uSmoke.x) {
+    float y = f.y, ph = uSmoke.w;
+    float cx = (0.01 + 0.08 * y) * sin(y * 11.0 - ph) + 0.1 * y * y;
+    float gap = abs(f.x - cx) / (uPix * 0.7 + 0.02 * y);
+    float a = (1.0 - gap) * uSmoke.z * smoothstep(uSmoke.x, uSmoke.x - 0.1, y) * (uSmoke.y > 0.0 ? smoothstep(uSmoke.y, uSmoke.y + 0.12, y) : 1.0)
+            * (1.0 - 0.9 * smoothstep(0.1, 0.7, y)) * (0.6 + 0.6 * noise(vec3(y * 16.0, 0.0, 1.0)));
+    if (gap < 1.0) { int k = rung(a * 1.6, 3); if (k > 0) col = SMOKE[k - 1]; }
+  }
+
+  // The planets, met exactly: lit only on the side that faces the flame
+  for (int i = 0; i < 3; i++) {
+    vec3 c = uPlanet[i].xyz; float r = PR[i], light = uPlanet[i].w;
+    if (light <= 0.0) continue;
+    vec3 oc = ro - c; float b = dot(oc, rd), disc = b * b - dot(oc, oc) + r * r;
+    float tp = disc > 0.0 ? -b - sqrt(disc) : 1e9;
+    if (tp < best) {
+      best = tp;
+      vec3 p = ro + rd * tp, n = (p - c) / r, L = normalize(uLamp - p);
+      vec3 base = i == 0 ? mix(vec3(0.6, 0.66, 0.74), vec3(0.42, 0.46, 0.55), step(0.66, noise(n * 5.0 + 3.0)))
+                : i == 1 ? mix(vec3(0.86, 0.48, 0.28), vec3(0.96, 0.8, 0.56), step(0.2, sin(n.y * 7.5 + 0.6)))
+                : vec3(0.93, 0.85, 0.66);
+      int k = rung(max(dot(n, L), 0.0) * light, 4);
+      col = base * WARM * LEVEL[k];
+    }
+    if (i == 2) {
+      vec3 rn = normalize(RING);
+      float tr = dot(c - ro, rn) / dot(rd, rn);
+      vec3 p = ro + rd * tr; float rr = length(p - c) / r;
+      if (tr < best && rr > 1.45 && rr < 2.3 && abs(rr - 1.85) > 0.08) {
+        best = tr;
+        float lit = (0.35 + 0.65 * abs(dot(rn, normalize(uLamp - p)))) * light;
+        col = vec3(0.82, 0.72, 0.56) * WARM * LEVEL[rung(lit * 0.85, 4)];
+      }
+    }
+  }
+
+  // The flame stands in front of whatever is behind its middle, and wraps the match except at its clear root
+  vec4 fl = flame(f);
+  if (fl.a > 0.0 && tFlame < best) { col = fl.rgb; best = fl.a > 0.75 ? tFlame - 1.0 : tFlame + 1.0; }
+
+  // The match, walked to
+  float t = 4.3;
+  for (int i = 0; i < 110; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.0012) { if (t < best) { vec3 p = ro + rd * t; col = matchColour(p, normalAt(p)); } break; }
+    t += d * 0.8;
+    if (t > 5.8 || t > best) break;
+  }
+
+  // Sparks thrown off by the strike, each a short streak
+  for (int i = 0; i < 6; i++) {
+    if (uSpark[i].w <= 0.0) continue;
+    vec3 a3 = uSpark[i].xyz - ro, b3 = uTrail[i] - ro;
+    vec2 a = vec2(dot(a3, uRight), dot(a3, uUp)), b = vec2(dot(b3, uRight), dot(b3, uUp)), ba = b - a;
+    float k = clamp(dot(-a, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
+    if (length(a + ba * k) < uPix * 0.6) col = FLAME[uSpark[i].w * (1.0 - k) > 0.5 ? 4 : 2];
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 0.64 }, uPix: { value: 0.01 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 1.0, 0) }, uKey: { value: V() },
+  uShift: { value: V() }, uFront: { value: 1 }, uCurl: { value: 0 }, uChar: { value: 0 }, uEmber: { value: 0 },
+  uGlow: { value: 0 }, uBurst: { value: 0 }, uFlameH: { value: 0 }, uFlameW: { value: 0 },
+  uBase: { value: V() }, uLamp: { value: V() }, uFlick: { value: new THREE.Vector4(0, 0, 0, 1) },
+  uPlanet: { value: [0, 1, 2].map(() => new THREE.Vector4()) }, uSmoke: { value: new THREE.Vector4() },
+  uSpark: { value: [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()) }, uTrail: { value: [0, 1, 2, 3, 4, 5].map(() => V()) },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uSpan.value = Math.max(0.5, 0.5 * rows / cols);
+  uniforms.uPix.value = 2 * uniforms.uSpan.value / rows;
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.14 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.0, 0.7);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+const EASE = {
+  lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5, fall: x => x ** 4, back: x => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2,
+};
+// A track is a list of [when, pose, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i], k = EASE[how]((t - t0) / (t1 - t0));
+    return typeof a === 'number' ? a + (b - a) * k : a.map((v, j) => v + (b[j] - v) * k);
+  }
+  return track[track.length - 1][1];
+}
+
+// The story, as written: dark, a strike, a long burn, the gutter, the smoke
+const S = sections({ dark: 0.6, strike: 0.9, burning: 5.0, gutter: 1.4, smoke: 2.1 });
+const P = params({
+  flame: [1, 0.6, 1.5],     // how big the flame burns
+  curl: [1, 0, 2],          // how far the burnt end curls over
+  orbit: [1, 0.7, 1.4],     // how far out the planets go round
+});
+
+// How bright the flame is: the flare, a dip as the phosphor is spent, the steady burn, then the stutters of the gutter
+const GLOW = [[0, 0], [0.6, 0], [0.66, 1.9, 'snap'], [0.95, 0.72, 'out'], [1.5, 1, 'io'], [6.5, 1], [6.75, 0.7], [6.85, 0.85, 'out'],
+  [7.15, 0.45], [7.25, 0.55, 'out'], [7.6, 0.2], [7.85, 0, 'in']];
+const BURST = [[0.6, 0], [0.64, 1, 'snap'], [1.0, 0, 'out']];
+const FRONT = [[0, 1], [1.4, 1], [6.5, 0.76, 'lin'], [7.9, 0.735, 'out']];      // how far down the stick has burnt
+const CHARRED = [[0.6, 0], [1.0, 0.35, 'out'], [2.6, 1, 'io']];                // how far the head has charred
+const EMBERS = [[0.6, 0], [0.9, 1, 'out'], [7.9, 1], [8.3, 0.75], [9.6, 0, 'out']];
+const SHIFT = [[0, [-0.02, -0.03]], [0.58, [-0.02, -0.03]], [0.66, [0.006, 0.008], 'snap'], [1.1, [0, 0], 'io']];   // the strike's flick
+// Each planet: its orbit, how many times round in a loop, and when it comes out and goes dark (outermost first)
+const PLANETS = [
+  { R: 0.2, k: 3, phase: 0.4, tilt: 0.3, on: 2.0, off: 7.3 },
+  { R: 0.31, k: 2, phase: 2.6, tilt: -0.2, on: 2.7, off: 6.95 },
+  { R: 0.43, k: 1, phase: 4.4, tilt: 0.14, on: 3.4, off: 6.6 },
+];
+// Sparks: which way each flies, how fast, how long it lasts
+const SPARKS = [[-0.7, 0.6, 0.2, 1.3, 0.3], [0.8, 0.5, -0.3, 1.1, 0.4], [-0.3, 0.9, -0.5, 1.5, 0.25], [0.5, 0.8, 0.5, 1.2, 0.35], [-0.9, 0.2, -0.2, 0.9, 0.45], [0.95, 0.1, 0.25, 1.0, 0.3]];
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = S.written(now), fl = S.round(now) * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.55 + 0.12 * Math.sin(fl) + view.yaw, pitch = view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The flame's light thrown back off the room, from over your left shoulder: it only tells one face of the stick from the other
+  U.uKey.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // The flame never sits still; more so as it dies
+  const gutter = t > 6.5 && t < 7.9 ? (t - 6.5) / 1.4 : 0;
+  const flicker = 1 + (0.05 * Math.sin(fl * 19) + 0.035 * Math.sin(fl * 37)) * (1 + 3 * gutter);
+  const g = key(GLOW, t) * flicker, burst = key(BURST, t);
+  U.uGlow.value = g; U.uBurst.value = burst;
+  U.uFlick.value.set((0.14 * Math.sin(fl * 7) + 0.08 * Math.sin(fl * 13 + 1)) * (1 + 2 * gutter), 0.07 + 0.04 * Math.sin(fl * 11), fl * 29,
+    1 + (0.05 * Math.sin(fl * 17) + 0.03 * Math.sin(fl * 31)) * (1 + 2 * gutter));
+  const H = 0.3 * P.flame * (0.3 + 0.7 * Math.min(g, 1.3)), W = 0.074 * P.flame * (0.55 + 0.45 * Math.min(g, 1.3));
+  U.uFlameH.value = g > 0.01 ? H : 0; U.uFlameW.value = W;
+
+  // The match burns down from the head, and what has burnt curls over
+  const front = key(FRONT, t), [sx, sy] = key(SHIFT, t);
+  U.uFront.value = front; U.uCurl.value = P.curl * 5 * (1 - front);
+  U.uChar.value = key(CHARRED, t);
+  U.uEmber.value = key(EMBERS, t) * (t > 7.9 ? 0.85 + 0.15 * Math.sin(fl * 4) : 1);
+  U.uShift.value.set(sx, sy, 0);
+  U.uBase.value.set(sx, front + 0.012 + sy, 0);
+  U.uLamp.value.set(sx, front + 0.012 + sy + H * 0.38, 0);
+
+  // Planets: out of the dark one after another, round the flame, dark again one by one
+  PLANETS.forEach((o, i) => {
+    const a = o.phase + fl * o.k, R = o.R * P.orbit;
+    const shown = EASE.io(clamp((t - o.on) / 0.8, 0, 1)) * (1 - clamp((t - o.off) / 0.3, 0, 1));
+    const L = U.uLamp.value;
+    U.uPlanet.value[i].set(L.x + R * Math.cos(a), L.y + R * Math.sin(a) * o.tilt, L.z + R * Math.sin(a),
+      Math.min(g, 1.3) * shown * 1.15 / (1 + 2.5 * R * R));
+  });
+
+  // Sparks off the strike, thrown out and falling
+  SPARKS.forEach(([dx, dy, dz, v, life], i) => {
+    const tau = t - 0.61 - i * 0.012, sp = U.uSpark.value[i];
+    if (tau <= 0 || tau >= life) { sp.w = 0; return; }
+    const n = Math.hypot(dx, dy, dz), vx = dx / n * v, vy = dy / n * v, vz = dz / n * v;
+    const ox = sx, oy = TOP + 0.04 + sy;
+    sp.set(ox + vx * tau, oy + vy * tau - 1.4 * tau * tau, vz * tau, 1 - tau / life);
+    U.uTrail.value[i].set(sp.x - vx * 0.035, sp.y - (vy - 2.8 * tau) * 0.035, sp.z - vz * 0.035);
+  });
+
+  // The smoke: a thread that rises once the flame is out, and thins away
+  const ts = t - 7.75;
+  U.uSmoke.value.set(clamp(ts * 0.32, 0, 0.75), clamp((ts - 1.1) * 0.4, 0, 0.8), ts > 0 ? 1 - clamp((ts - 1.3) / 0.9, 0, 1) : 0, fl * 3);
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

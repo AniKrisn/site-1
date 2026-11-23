@@ -1,0 +1,294 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795375636561;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Almost there</title>
+<style>
+  /* Layout: the whole frame is the picture, on black, drawn in chunky pixels. */
+  :root { --bg: #000000; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; margin: 0; }
+  #stage { position: fixed; left: 0; top: 0; display: block; image-rendering: pixelated; }
+</style>
+
+<canvas id="stage" aria-label="A looping scene. On a black screen a mountain lake renders tile by tile from the top while a progress bar fills, stalls at 99% with the sun's tile missing, then the sun drops in, the water ripples and birds fly, and it all clears to black."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// A flat picture in pixels: the thing is the old renderer (tiles, bar, the late sun); the land is hills, lake, shore and pines; beyond is the sky
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes, uSunTile, uSun;
+uniform float uTS, uBar, uNX, uCut, uCur, uPart, uBlink, uDrop, uSunOn, uFlash, uFade, uPct, uLive, uOn, uSunR, uHalf, uWaves;
+uniform vec3 uSunCol;
+
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const float HORIZON = -0.08;   // where the far shore meets the water
+const vec3 SKY[4] = vec3[4](vec3(0.98, 0.90, 0.74), vec3(0.86, 0.90, 0.88), vec3(0.64, 0.80, 0.92), vec3(0.45, 0.66, 0.88));   // low to high
+const vec3 FAR[3] = vec3[3](vec3(0.52, 0.56, 0.74), vec3(0.70, 0.72, 0.86), vec3(0.94, 0.95, 0.99));    // shade, lit, snow
+const vec3 NEAR[4] = vec3[4](vec3(0.22, 0.31, 0.42), vec3(0.33, 0.45, 0.50), vec3(0.47, 0.60, 0.56), vec3(0.86, 0.90, 0.95));
+const vec3 WATER = vec3(0.14, 0.27, 0.48);
+const vec3 GRASS[3] = vec3[3](vec3(0.09, 0.19, 0.13), vec3(0.14, 0.30, 0.18), vec3(0.24, 0.44, 0.22));
+const vec3 TREE[3] = vec3[3](vec3(0.04, 0.12, 0.11), vec3(0.08, 0.22, 0.16), vec3(0.16, 0.35, 0.20));
+const vec3 FARP[6] = vec3[6](vec3(-0.95, 0.3, 0.13), vec3(-0.55, 0.3, 0.17), vec3(-0.18, 0.32, 0.22), vec3(0.18, 0.26, 0.14), vec3(0.52, 0.3, 0.2), vec3(0.9, 0.3, 0.15));   // centre, half width, height
+const vec3 NEARP[6] = vec3[6](vec3(-0.85, 0.2, 0.09), vec3(-0.42, 0.22, 0.12), vec3(0.02, 0.2, 0.08), vec3(0.34, 0.2, 0.12), vec3(0.72, 0.2, 0.08), vec3(1.05, 0.2, 0.1));
+const vec3 TREES[6] = vec3[6](vec3(-0.74, -0.32, 0.27), vec3(0.6, -0.33, 0.36), vec3(-0.62, -0.34, 0.34), vec3(0.71, -0.35, 0.26), vec3(0.5, -0.36, 0.22), vec3(-0.5, -0.37, 0.24));   // back to front
+const int GLYPH[11] = int[11](31599, 11415, 29671, 29647, 23497, 31183, 31215, 29257, 31727, 31695, 21157);   // 3x5 digits and %
+
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+// Flat tones with dots only in the seam between them
+int band(float t, int steps) { float x = clamp(t, 0.0, 1.0) * float(steps), f = fract(x); return min(int(x) + (smoothstep(0.3, 0.7, f) > dots() ? 1 : 0), steps); }
+float picH() { return uRes.y - uBar; }
+vec2 toPic(vec2 f) { return vec2(f.x - uRes.x * 0.5, f.y - uBar - picH() * 0.5) / picH(); }
+
+// Beyond: the sky, warm at the horizon
+vec3 beyond(vec2 p) { return SKY[band((p.y - HORIZON) / (0.5 - HORIZON), 3)]; }
+
+// A mountain range at x: how high, and the centre and height of the peak that makes it
+vec3 ridge(float x, bool near) {
+  vec3 best = vec3(-1.0, 0.0, 0.0);
+  for (int i = 0; i < 6; i++) {
+    vec3 k = near ? NEARP[i] : FARP[i];
+    float h = k.z * (1.0 - abs(x - k.x) / k.y);
+    if (h > best.x) best = vec3(h, k.x, k.z);
+  }
+  best.x += 0.005 * sin(x * 61.0) + 0.003 * sin(x * 137.0);
+  return best;
+}
+// The land above the water: two ranges against the sky, lit from the left
+vec3 hills(vec2 p) {
+  vec3 col = beyond(p);
+  float y = p.y - HORIZON;
+  vec3 f = ridge(p.x, false);
+  if (y < f.x) {
+    bool lit = p.x < f.y;
+    col = lit ? FAR[1] : FAR[0];
+    if (y > f.z - 0.04 + 0.012 * sin(p.x * 95.0)) col = lit ? FAR[2] : mix(FAR[2], FAR[0], 0.4);
+  }
+  vec3 n = ridge(p.x, true);
+  if (y < n.x) {
+    bool lit = p.x < n.y;
+    col = lit ? NEAR[1 + band(y / max(n.z, 0.01) * 1.3 - 0.2, 1)] : NEAR[0];
+    if (y > n.z - 0.022 + 0.008 * sin(p.x * 120.0)) col = lit ? NEAR[3] : mix(NEAR[3], NEAR[0], 0.45);
+  }
+  return col;
+}
+float shore(float x) { return -0.3 + 0.025 * sin(x * 4.0 + 1.0) + 0.012 * sin(x * 11.0); }
+// The lake: the hills upside down, darker, broken by ripples and the sun's glint
+vec3 lake(vec2 p) {
+  float depth = HORIZON - p.y, row = floor(p.y * picH());
+  float move = uLive * uWaves;
+  float ripple = (0.003 + 0.004 * min(uLive, 1.0) * uWaves) * sin(row * 1.9 - move * 6.0) * (0.3 + depth * 4.0);
+  vec3 col = mix(hills(vec2(p.x + ripple, HORIZON + depth)), WATER, clamp(0.35 + depth * 1.6, 0.0, 0.8));
+  float side = mod(row, 2.0) * 2.0 - 1.0;
+  if (depth > 0.015 && fract(p.x * 2.5 + hash(row) * 7.0 + side * move * 0.12) < 0.12) col = mix(col, SKY[1], 0.35);
+  float w = 0.01 + depth * 0.13;
+  if (mod(row, 2.0) < 1.0 && abs(p.x - uSun.x + 0.012 * sin(row * 1.7 + move * 7.0)) < w * (0.5 + 0.5 * hash(row + floor(move * 4.0)))) col = mix(col, uSunCol, 0.75);
+  return col;
+}
+// The near shore, darkening towards the bottom of the frame
+vec3 ground(vec2 p) {
+  float d = shore(p.x) - p.y;
+  if (d < 0.008) return GRASS[2];
+  return GRASS[1 - band(d / 0.12, 1)];
+}
+// A pine: tiers that narrow to a point, lit on the left; -1 where it is not
+int pine(vec2 p, vec3 t, float sway) {
+  float u = (p.y - t.y) / t.z;
+  if (u < 0.0 || u > 1.0) return -1;
+  float dx = p.x - t.x - sway * u * u;
+  if (u < 0.08) return abs(dx) < 0.007 ? 0 : -1;
+  float v = (u - 0.08) / 0.92, tier = fract(v * 4.0 + 0.2);
+  float half_ = t.z * 0.3 * (1.0 - v * 0.9) * (1.0 - 0.45 * tier);
+  if (abs(dx) > half_) return -1;
+  return dx < -half_ * 0.25 ? 2 : (dx > half_ * 0.35 ? 0 : 1);
+}
+// One bird: a few pixels, wings up or down
+bool bird(vec2 p, vec2 b, float up) {
+  ivec2 d = ivec2(floor((p - b) * picH() + 0.5));
+  if (d.y == 0) return up > 0.5 ? abs(d.x) <= 1 : abs(d.x) == 2;
+  if (d.y == 1) return up > 0.5 ? abs(d.x) == 2 : abs(d.x) <= 1;
+  return false;
+}
+
+// The finished picture at a pixel
+vec3 picture(vec2 f) {
+  vec2 p = toPic(f);
+  vec3 col;
+  if (p.y > HORIZON) {
+    col = hills(p);
+    float d = length(p - uSun);
+    if (d < uSunR) col = d < uSunR * (0.62 + 0.2 * dots()) ? uSunCol : uSunCol * vec3(1.0, 0.84, 0.6);
+  } else col = p.y > shore(p.x) ? lake(p) : ground(p);
+  float spread = max(1.0, uHalf / 0.7), sway = 0.006 * sin(uLive * 2.6) * min(uLive, 1.0);
+  for (int i = 0; i < 6; i++) {
+    vec3 t = TREES[i]; t.x *= spread;
+    int k = pine(p, t, sway * (1.0 + 0.3 * float(i)));
+    if (k >= 0) col = TREE[k];
+  }
+  if (uLive > 0.0) for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 b = vec2(-uHalf - 0.05 + 0.3 * uLive - fi * 0.06, 0.2 + fi * 0.035 + 0.012 * sin(uLive * 3.0 + fi * 2.0));
+    if (bird(p, b, mod(floor(uLive * 7.0 + fi * 1.3), 2.0))) col = NEAR[0];
+  }
+  return col;
+}
+
+// The progress bar and its number along the bottom
+vec3 bar(vec2 f) {
+  ivec2 c = ivec2(f);
+  vec3 lineCol = vec3(0.45, 0.47, 0.55), fill = vec3(0.86, 0.9, 0.98);
+  int x1 = int(uRes.x) - 22, pct = int(uPct);
+  if (c.y >= 2 && c.y <= 6 && c.x >= 2 && c.x <= x1) {
+    if (c.y == 2 || c.y == 6 || c.x == 2 || c.x == x1) return lineCol;
+    int end = 3 + int(float(x1 - 4) * float(pct) / 100.0);
+    if (c.x < end) return fill;
+    if (c.x == end && uBlink > 0.5) return lineCol;
+    return vec3(0.0);
+  }
+  int n = pct >= 100 ? 4 : (pct >= 10 ? 3 : 2), x0 = int(uRes.x) - 1 - n * 4, j = (c.x - x0) / 4;
+  ivec2 g = ivec2((c.x - x0) - j * 4, 6 - c.y);
+  if (c.x < x0 || j >= n || g.x > 2 || g.y < 0 || g.y > 4) return vec3(0.0);
+  int d = j == n - 1 ? 10 : (n == 4 ? (j == 0 ? 1 : 0) : (n == 3 && j == 0 ? pct / 10 : pct % 10));
+  return ((GLYPH[d] >> ((4 - g.y) * 3 + (2 - g.x))) & 1) == 1 ? fill : vec3(0.0);
+}
+
+void main() {
+  vec2 f = gl_FragCoord.xy;
+  vec3 col = vec3(0.0);
+  if (f.y < uBar) col = uOn > 0.5 ? bar(f) : col;
+  else {
+    float yTop = uRes.y - f.y;
+    vec2 cell = floor(vec2(f.x, yTop) / uTS), local = vec2(f.x, yTop) - cell * uTS;
+    float idx = cell.y * uNX + cell.x;
+    bool isSun = cell == uSunTile;
+    // The missing tile falling into its place, drawn over everything
+    vec2 home = uSunTile * uTS;
+    float ly = yTop + uDrop - home.y;
+    bool inDrop = uSunOn > 0.5 && f.x >= home.x && f.x < home.x + uTS && ly >= 0.0 && ly < uTS;
+    if (inDrop) col = picture(vec2(f.x, f.y - uDrop));
+    else if (!isSun && idx < uCut) col = picture(f);
+    else if (idx == uCur && local.y < floor(uPart * uTS)) col = picture(f);
+    // The tile being worked on has a frame round it
+    if (!inDrop && idx == uCur && uBlink > 0.5 && (local.x < 1.0 || local.y < 1.0 || local.x >= uTS - 1.0 || local.y >= uTS - 1.0)) col = vec3(0.55, 0.58, 0.66);
+  }
+  if (dots() < uFlash) col = mix(col, vec3(1.0), 0.6);
+  if (dots() < uFade) col = vec3(0.0);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V2 = () => new THREE.Vector2();
+const uniforms = {
+  uRes: { value: V2() }, uSunTile: { value: V2() }, uSun: { value: V2() }, uSunCol: { value: new THREE.Color() },
+  uTS: { value: 8 }, uBar: { value: 9 }, uNX: { value: 1 }, uCut: { value: -1 }, uCur: { value: -1 }, uPart: { value: 0 },
+  uBlink: { value: 0 }, uDrop: { value: 0 }, uSunOn: { value: 0 }, uFlash: { value: 0 }, uFade: { value: 0 }, uPct: { value: 0 },
+  uLive: { value: 0 }, uOn: { value: 0 }, uSunR: { value: 0.03 }, uHalf: { value: 0.7 }, uWaves: { value: 1 },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+}
+
+const EASE = { lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3, fall: x => x ** 4 };
+// A track is a list of [when, value, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i];
+    return a + (b - a) * EASE[how]((t - t0) / (t1 - t0));
+  }
+  return track[track.length - 1][1];
+}
+const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+
+const P = params({
+  tiles: [10, 5, 18],         // how many rows of tiles the picture is cut into
+  sunColour: '#fff3c2',       // colour of the sun
+  waves: [1, 0, 3],           // how much the water moves once it comes alive
+});
+const S = sections({ black: 0.5, rendering: 6.5, waiting: 2.2, sun: 0.5, alive: 2.8, clear: 0.7 });
+const W = { render: 0.5, wait: 7.0, sun: 9.2, clear: 12.5 };   // where each part starts, as written
+const BAR = 9, LAND = 0.26;     // the bar's height in pixels; when the falling tile lands
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const U = uniforms, t = S.written(now), real = ((now % S.length) + S.length) % S.length;
+  const picH = rows - BAR, TS = Math.max(4, Math.round(picH / P.tiles));
+  const nx = Math.ceil(cols / TS), ny = Math.ceil(picH / TS), N = nx * ny;
+  const sx = clamp(Math.floor(nx * 0.7), 1, nx - 1), sy = ny > 5 ? 1 : 0, sunIdx = sy * nx + sx;
+  U.uBar.value = BAR; U.uTS.value = TS; U.uNX.value = nx; U.uSunTile.value.set(sx, sy);
+  U.uSun.value.set(((sx + 0.5) * TS - cols / 2) / picH, 0.5 - (sy + 0.5) * TS / picH);
+  U.uSunR.value = 0.36 * TS / picH; U.uHalf.value = cols / 2 / picH;
+  U.uSunCol.value.set(P.sunColour); U.uWaves.value = P.waves;
+
+  // How long each tile takes: sky is quick, the hills and pines slow, and now and then one sticks
+  const order = [], cost = [];
+  for (let i = 0; i < N; i++) if (i !== sunIdx) {
+    const tx = i % nx, ty = Math.floor(i / nx), y = 0.5 - (ty + 0.5) * TS / picH;
+    const base = y > 0.17 ? 0.45 : y > -0.08 ? 1.3 : y > -0.28 ? 0.9 : 1.5;
+    order.push(i); cost.push(base * (0.6 + 0.8 * hash(tx, ty)) + (hash(ty, tx + 9) > 0.965 ? 3 : 0));
+  }
+  const total = cost.reduce((a, b) => a + b, 0), span = W.wait - W.render;
+  let done = 0, part = 0;
+  if (t >= W.wait) done = order.length;
+  else if (t >= W.render) {
+    let left = (t - W.render) / span * total;
+    while (done < order.length && left >= cost[done]) left -= cost[done++];
+    part = done < order.length ? left / cost[done] : 0;
+  }
+  const started = t >= W.render, ts = t - W.sun, landed = ts >= LAND;
+  U.uOn.value = started ? 1 : 0;
+  U.uCut.value = !started ? -1 : done < order.length ? order[done] : N;
+  U.uCur.value = !started || ts >= 0 ? -1 : done < order.length ? order[done] : sunIdx;
+  U.uPart.value = part;
+  U.uBlink.value = t < W.wait ? 1 : (ts < 0 && Math.floor(real * 2.5) % 2 === 0 ? 1 : 0);
+  U.uPct.value = landed ? 100 : t >= W.wait ? 99 : Math.min(99, Math.floor(100 * done / N));
+
+  // The sun's tile falls in from above, bounces once and the picture flashes
+  U.uSunOn.value = ts >= 0 ? 1 : 0;
+  U.uDrop.value = Math.round(key([[0, 1.4], [LAND, 0, 'fall'], [0.33, 0.15, 'out'], [0.42, 0, 'in']], ts) * TS);
+  U.uFlash.value = landed ? clamp(1 - (ts - LAND) / 0.35, 0, 1) * 0.8 : 0;
+  // Alive from the landing on, in real seconds so it keeps moving however long it is held
+  U.uLive.value = Math.max(0, real - S.start('sun') - LAND);
+  U.uFade.value = clamp((t - W.clear) / 0.6, 0, 1);
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

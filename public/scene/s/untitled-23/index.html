@@ -1,0 +1,346 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795391601670;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Don't</title>
+<style>
+  /* Layout: a black page with one thing on it, drawn in chunky pixels */
+  :root { --bg: #000000; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A ten second loop. Ivory dominoes stand in a spiral on a black page stained wine-dark, under a flickering torch. The first is tipped and the fall runs faster and faster round to the middle, where the last one rocks and does not fall. Then they all stand back up, from the middle outwards."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// The dominoes: how many, how big, how far apart
+const N = 14, H = 0.46, W = 0.23, T = 0.08, GAP = 0.3;
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight, uIvory, uWine, uGold;
+uniform float uSpan, uSheen, uPage, uFlick;
+uniform vec3 uPiv[${N}];    // the front bottom edge each domino tips on
+uniform mat3 uRot[${N}];    // world to its own space: x forward, y up, z across
+uniform vec2 uPips[${N}];   // pips on its top and bottom halves
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+const float HH = ${H / 2}, HW = ${W / 2}, HT = ${T / 2}, ROUND = 0.02;
+// Which of the nine places on a half are drilled, for each count from blank to six
+const int MASKS[7] = int[7](0, 16, 257, 273, 325, 341, 365);
+// The page: black, with a little of the lamp on it near the middle, stained the colour of wine
+const float FLOOR[4] = float[4](0.0, 0.07, 0.17, 0.32);
+
+float rbox(vec3 q, vec3 b, float r) { vec3 d = abs(q) - b + r; return length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0) - r; }
+vec3 local(int i, vec3 p) { return (p - uPiv[i]) * uRot[i]; }
+float piece(vec3 q) { return rbox(q - vec3(-HT, HH, 0.0), vec3(HT, HH, HW), ROUND); }
+
+// The thing: every domino, each a rounded slab turned about its own front edge
+float map(vec3 p) {
+  float d = 1e3;
+  for (int i = 0; i < ${N}; i++) d = min(d, piece(local(i, p)));
+  return d;
+}
+int nearest(vec3 p) {
+  float d = 1e3; int k = 0;
+  for (int i = 0; i < ${N}; i++) { float e = piece(local(i, p)); if (e < d) { d = e; k = i; } }
+  return k;
+}
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.003, -0.003);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.02;
+  for (int i = 0; i < 30; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 6.0 * d / t);
+    t += clamp(d, 0.02, 0.12);
+    if (res < 0.01 || t > 2.2) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+// Tones in clean bands: flat colour, with dots only in a narrow seam where one band meets the next
+float banded(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps, f = fract(x); return min(floor(x) + (smoothstep(0.38, 0.62, f) > dots() ? 1.0 : 0.0), steps) / steps; }
+// Ivory in five tones, going wine-dark as it goes into shadow
+vec3 ivory(float t) {
+  float k = banded(t, 4.0), f = mix(0.3, 1.0, k);
+  return uIvory * f * mix(normalize(uWine + 1e-3) * 1.5, vec3(1.0), sqrt(k));
+}
+
+// Is this spot on a face drilled? 0 no, 1 the dark of the hole, 2 its far wall catching the lamp
+float pip(vec3 q, int i, vec2 ld) {
+  bool front = q.x > -0.012, back = q.x < -${T} + 0.012;
+  if (!(front || back) || abs(q.z) > HW - 0.02 || q.y < 0.02 || q.y > ${H} - 0.02) return 0.0;
+  float half_ = q.y > HH ? 1.0 : 0.0, n = half_ > 0.5 ? uPips[i].x : uPips[i].y;
+  float g = ${W} * 0.29, rp = 0.029;
+  vec2 u = vec2(back ? -q.z : q.z, q.y - (half_ > 0.5 ? HH * 1.5 : HH * 0.5)) / g;
+  vec2 c = clamp(floor(u + 0.5), -1.0, 1.0);
+  int bit = int((c.y + 1.0) * 3.0 + (c.x + 1.0));
+  if (((MASKS[int(n)] >> bit) & 1) == 0) return 0.0;
+  vec2 o = (u - c) * g;
+  if (length(o) > rp) return 0.0;
+  return dot(o, ld) < -0.45 * rp ? 2.0 : 1.0;
+}
+
+// The land: what the thing stands on and its shadow falls on. Here a black page, softly lit, with nothing beyond it.
+vec3 landAt(vec3 g, float lit) {
+  float pool = (1.0 - smoothstep(0.9, 3.2, length(g.xz))) * uFlick;
+  float under = 1.0 - clamp(map(g) / 0.07, 0.0, 1.0);
+  float x = banded(pool * uPage * (0.3 + 0.7 * lit) * (1.0 - 0.7 * under * under), 3.0) * 3.0;
+  return uWine * FLOOR[int(x + 0.5)];
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(0.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0;
+
+  // Only rays that pass near the spiral need walking
+  vec3 oc = ro - vec3(0.0, 0.3, 0.0); float b = dot(oc, rd), c = dot(oc, oc) - 1.45 * 1.45, disc = b * b - c;
+  if (disc > 0.0) {
+    float t = max(-b - sqrt(disc), 0.0), tEnd = min(-b + sqrt(disc), tFloor);
+    for (int i = 0; i < 110 && t < tEnd; i++) {
+      float d = map(ro + rd * t);
+      if (d < 0.0015) { tHit = t; break; }
+      t += d;
+    }
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    int k = nearest(p);
+    vec3 q = local(k, p);
+    float sh = lightAt(p + n * 0.01);
+    // The lamp as it falls across this domino's face, to light the far wall of each hole
+    vec3 lq = uLight * uRot[k];
+    float hole = pip(q, k, normalize(vec2(q.x > -HT ? lq.z : -lq.z, lq.y) + 1e-4));
+    float lit = max(dot(n, uLight), 0.0) * sh * uFlick;
+    float nook = clamp(0.55 + 0.45 * map(p + n * 0.05) / 0.05, 0.0, 1.0);
+    float rim = pow(1.0 - max(dot(n, -uFwd), 0.0), 3.0);
+    float tone = (0.22 + 0.72 * lit + 0.12 * n.y + 0.1 * rim) * nook;
+    col = ivory(tone);
+    // The sheen: a hard gold glint where the polish turns the lamp straight back
+    float spec = pow(max(dot(n, normalize(uLight - uFwd)), 0.0), 70.0) * sh * uSheen * uFlick;
+    if (spec > 0.08 + 0.6 * dots()) col = mix(uGold, vec3(1.0), 0.1);
+    // The groove across the middle of each face
+    bool face = q.x > -0.012 || q.x < -${T} + 0.012;
+    if (face && abs(q.y - HH) < 0.009 && abs(q.z) < HW - 0.04) col = ivory(tone * 0.45);
+    if (hole > 1.5) col = ivory(0.12 + 0.2 * sh);
+    else if (hole > 0.5) col = vec3(0.012, 0.01, 0.01);
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    col = landAt(g, lightAt(g + vec3(0.0, 0.01, 0.0)));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 1 }, uIvory: { value: new THREE.Color() }, uSheen: { value: 1 }, uPage: { value: 1 },
+  uWine: { value: new THREE.Color() }, uGold: { value: new THREE.Color() }, uFlick: { value: 1 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.12, 0) }, uLight: { value: V() },
+  uPiv: { value: Array.from({ length: N }, () => V()) }, uRot: { value: Array.from({ length: N }, () => new THREE.Matrix3()) },
+  uPips: { value: Array.from({ length: N }, () => new THREE.Vector2()) },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+const ZOOM = 0.98;
+let span0 = 1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  span0 = Math.max(ZOOM, ZOOM * 1.33 * rows / cols);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.62 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.2, 1.3);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// The spiral: walked out from the middle, one domino every GAP along it, then numbered from the outside in
+const R_IN = 0.3, PITCH = 0.44;
+const spot = (a) => { const r = R_IN + PITCH / (Math.PI * 2) * a, th = 2.2 - a; return [r * Math.cos(th), r * Math.sin(th)]; };
+const places = [];
+{
+  let a = 0, [x, z] = spot(0), run = 0;
+  places.push([x, z]);
+  while (places.length < N) {
+    a += 0.002; const [nx, nz] = spot(a); run += Math.hypot(nx - x, nz - z); x = nx; z = nz;
+    if (run >= GAP) { places.push([x, z]); run -= GAP; }
+  }
+  places.reverse();
+}
+// Each faces along the spiral: the way from the one before it to the one after it
+const facing = places.map((p, i) => {
+  const a = places[Math.max(i - 1, 0)], b = places[Math.min(i + 1, N - 1)];
+  const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+  return [dx / l, dz / l];
+});
+const PIPS = [[6, 4], [5, 2], [3, 3], [1, 6], [4, 0], [2, 5], [6, 1], [3, 5], [4, 4], [0, 2], [5, 3], [2, 6], [1, 4], [6, 6]];
+
+// Where a domino's front bottom edge is, and its own forward, up and across when tipped forward by th
+function pose(i, th) {
+  const [fx, fz] = facing[i], c = Math.cos(th), s = Math.sin(th);
+  return {
+    piv: [places[i][0] + fx * T / 2, 0, places[i][1] + fz * T / 2],
+    F: [fx * c, -s, fz * c], U: [fx * s, c, fz * s], S: [-fz, 0, fx],
+  };
+}
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+// How far domino i can tip before its top edge meets the back of the next one, tipped by thNext
+function lean(i, thNext) {
+  const j = pose(i + 1, thNext);
+  const gap = th => {
+    const m = pose(i, th); let g = 1e3;
+    for (const k of [-0.92, 0, 0.92]) {
+      const X = [0, 1, 2].map(a => m.piv[a] + m.U[a] * H + m.S[a] * k * W / 2 - j.piv[a]);
+      g = Math.min(g, -T - dot3(X, j.F));
+      // and the next one's top back edge must stay in front of this one's face
+      const Y = [0, 1, 2].map(a => j.piv[a] + j.U[a] * H - j.F[a] * T + j.S[a] * k * W / 2 - m.piv[a]);
+      if (dot3(Y, m.U) < H) g = Math.min(g, dot3(Y, m.F));
+    }
+    return g;
+  };
+  let lo = 0, hi = Math.PI / 2;
+  if (gap(hi) >= 0) return hi;
+  if (gap(lo) < 0) return 0;
+  for (let n = 0; n < 22; n++) { const m = (lo + hi) / 2; if (gap(m) >= 0) lo = m; else hi = m; }
+  return lo;
+}
+// How far each tips before it meets the next while that one still stands, and how they lie once it is all down
+const meet = Array.from({ length: N - 1 }, (_, i) => lean(i, 0));
+const rest = new Array(N).fill(0);
+for (let i = N - 2; i >= 0; i--) rest[i] = lean(i, rest[i + 1]);
+
+const EASE = { in: x => x * x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2 };
+const bump = (t, at, len) => t > at && t < at + len ? Math.sin((t - at) / len * Math.PI) : 0;
+const unit = (t, at, len) => clamp((t - at) / len, 0, 1);
+
+// The story, in seconds as written
+const NUDGE = 0.45, FIRST = 0.6, EACH = 0.21, STAGGER = 0.13, RISE = 0.42, ROCK = 1.4;
+const S = sections({ still: 0.7, tip: NUDGE + FIRST, fall: (N - 2) * EACH, rock: ROCK, hold: 1.5, rise: (N - 2) * STAGGER + RISE + 0.25, after: 0.6 });
+// When each domino starts to go, and when it meets the next: slow at first, faster and faster as it winds in
+const starts = [], hits = [];
+{
+  let t = 0.7 + NUDGE;
+  for (let i = 0; i < N - 1; i++) { starts.push(t); t += i === 0 ? FIRST : EACH * (1.45 - 0.9 * (i - 1) / (N - 3)); hits.push(t); }
+}
+const riseAt = 0.7 + NUDGE + FIRST + (N - 2) * EACH + ROCK + 1.5;
+
+const P = params({
+  ivory: '#f6edd6',          // the colour of the dominoes in full light
+  sheen: [1, 0, 2],          // how strongly the polish glints
+  page: [1, 0, 2],           // how much lamp falls on the black page
+  wine: '#7a1030',           // the colour the shadows and the page sink into
+  gold: '#ffc94a',           // the colour of the glint
+  flicker: [1, 0, 2],        // how much the lamp flickers like a torch
+  wild: [1, 0, 2],           // how hard they land, bounce and jolt the view
+});
+
+const th = new Array(N).fill(0);
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = S.written(now), round = S.round(now) * Math.PI * 2, U = uniforms;
+
+  // The view leans in as the fall gathers pace, stays close on the last one, and draws back as they rise
+  const close = EASE.io(unit(t, 0.7, hits[N - 2] - 0.7)) * (1 - EASE.io(unit(t, riseAt, (N - 2) * STAGGER + RISE)));
+  // and every landing jolts it, harder towards the middle
+  let jolt = 0;
+  for (let i = 0; i < N - 1; i++) { const a = t - hits[i]; if (a > 0 && a < 0.6) jolt += (0.4 + 0.6 * i / (N - 2)) * Math.exp(-a * 9) * Math.sin(a * 42); }
+  jolt *= P.wild;
+  U.uSpan.value = span0 * (1 - 0.16 * close);
+  U.uTarget.value.set(0, 0.12 - 0.02 * jolt, 0);
+
+  // Where you are looking from: a slow sway, so it stays a solid thing
+  const yaw = 0.35 + 0.12 * Math.sin(round) + 0.03 * jolt + view.yaw, pitch = view.pitch + 0.02 * jolt;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  // The lamp is a torch: it flickers and wavers, in whole cycles of the loop
+  const fl = 0.5 * Math.sin(round * 7 + 1) + 0.3 * Math.sin(round * 17 + 0.4) + 0.2 * Math.sin(round * 41 + 2);
+  U.uFlick.value = 1 + 0.13 * P.flicker * fl;
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5 + 0.08 * P.flicker * Math.sin(round * 11 + 0.7)).normalize();
+
+  // The last one, struck, rocks forward to the very brink and hangs there, then twice more, smaller, and stays up
+  const r = t - hits[N - 2], brink = Math.atan(T / H) - 0.012;
+  th[N - 1] = brink * clamp(0.5 + 0.5 * P.wild, 0, 1) * Math.pow(bump(r, 0, 0.8), 0.6) + 0.06 * bump(r, 0.8, 0.32) + 0.02 * bump(r, 1.12, 0.2);
+  // Each of the rest: falling freely once struck, but never further than the next one lets it, and lifted again in turn from the middle
+  for (let i = N - 2; i >= 0; i--) {
+    const x = (t - starts[i]) / (hits[i] - starts[i]);
+    let free = x <= 0 ? 0 : meet[i] * (i === 0 ? x * x : 0.4 * x + 0.6 * x * x);
+    if (i === 0) free += 0.035 * bump(t, 0.7, NUDGE);
+    const up = riseAt + (N - 2 - i) * STAGGER, k = unit(t, up, RISE);
+    const cap = rest[i] * (1 - k * k) + 0.03 * bump(t, up + RISE, 0.2);
+    th[i] = Math.min(free, lean(i, th[i + 1]), cap) - P.wild * (0.03 + 0.05 * i / (N - 2)) * (bump(t, hits[i], 0.12) + 0.35 * bump(t, hits[i] + 0.12, 0.1));
+  }
+  for (let i = 0; i < N; i++) {
+    const m = pose(i, Math.max(th[i], 0));
+    U.uPiv.value[i].set(...m.piv);
+    U.uRot.value[i].set(m.F[0], m.U[0], m.S[0], m.F[1], m.U[1], m.S[1], m.F[2], m.U[2], m.S[2]);
+    U.uPips.value[i].set(...PIPS[i]);
+  }
+  U.uIvory.value.set(P.ivory);
+  U.uSheen.value = P.sheen;
+  U.uPage.value = P.page;
+  U.uWine.value.set(P.wine).convertLinearToSRGB();
+  U.uGold.value.set(P.gold).convertLinearToSRGB();
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

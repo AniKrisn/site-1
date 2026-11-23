@@ -1,0 +1,324 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795376515382;window.__values={"shape":3,"back":3,"eye":3,"nothing":3,"width":0.186,"haze":2,"size":2.111};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Something's out there</title>
+<style>
+  /* Layout: the whole frame is the sea at night, drawn in chunky pixels. */
+  :root { --bg: #000000; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="A twelve second loop. A black sea at night with a small lighthouse on a rock at the right. Its beam sweeps across the water four times; each sweep shows something enormous under the surface, closer each time: a shape, a back, an eye. On the last sweep there is nothing there."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to shapes described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uCam, uLamp, uBeam;
+uniform vec2 uHeading;          // which way the beam points, flat on the sea
+uniform float uFov, uWidth, uHaze, uRound;
+uniform vec4 uC;                // where the thing is, and how big (0 when it is not there)
+uniform mat3 uOwn;              // turns the world into the thing's own space
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+const vec3 SEA[5] = vec3[5](vec3(0.0, 0.008, 0.022), vec3(0.03, 0.05, 0.09), vec3(0.08, 0.13, 0.19), vec3(0.2, 0.29, 0.35), vec3(0.5, 0.6, 0.62));
+const vec3 HIDE[5] = vec3[5](vec3(0.01, 0.02, 0.025), vec3(0.06, 0.09, 0.08), vec3(0.14, 0.19, 0.15), vec3(0.27, 0.33, 0.24), vec3(0.46, 0.5, 0.36));
+const vec3 IRIS[4] = vec3[4](vec3(0.02, 0.015, 0.0), vec3(0.3, 0.2, 0.03), vec3(0.66, 0.5, 0.1), vec3(0.98, 0.87, 0.38));
+const vec3 STONE[4] = vec3[4](vec3(0.015, 0.015, 0.025), vec3(0.06, 0.06, 0.08), vec3(0.15, 0.15, 0.18), vec3(0.3, 0.29, 0.31));
+const vec3 PAINT[3] = vec3[3](vec3(0.05, 0.015, 0.02), vec3(0.17, 0.05, 0.04), vec3(0.34, 0.1, 0.08));
+const vec3 SKY_TOP = vec3(0.0, 0.004, 0.015), SKY_LOW = vec3(0.02, 0.03, 0.065);
+const vec3 GLOW = vec3(1.0, 0.93, 0.68);
+const vec3 TOWER = vec3(1.7, 0.0, -1.0);   // foot of the lighthouse
+const vec3 EYE = vec3(2.0, 0.31, 0.46);    // where the eye sits on its head
+const float EYE_R = 0.15;
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+int rung(float t, int n) { float x = clamp(t, 0.0, 1.0) * float(n - 1); return min(int(x) + (fract(x) > dots() ? 1 : 0), n - 1); }
+
+// The thing: something enormous, in its own space with its head toward +x, a ridge of knobs down its back
+float beastPart(vec3 q) {
+  vec3 m = vec3(q.x, q.y, abs(q.z));
+  float d = egg(m, vec3(-0.2, 0.0, 0.0), vec3(2.3, 0.45, 0.72));
+  d = smin(d, egg(m, vec3(1.9, 0.05, 0.0), vec3(0.8, 0.4, 0.6)), 0.3);       // head
+  d = smin(d, egg(m, vec3(-2.6, -0.05, 0.0), vec3(0.9, 0.2, 0.3)), 0.3);     // tail
+  float knobs = 1e3;
+  for (int i = 0; i < 6; i++) { float x = -1.6 + 0.5 * float(i); knobs = min(knobs, ball(m, vec3(x, 0.4 - 0.02 * abs(x), 0.0), 0.15)); }
+  d = smin(d, knobs, 0.05);
+  return smin(d, ball(m, EYE, EYE_R), 0.05);                                  // the eye's bulge
+}
+float beast(vec3 p) { return beastPart(uOwn * (p - uC.xyz) / uC.w) * uC.w; }
+vec3 beastNormal(vec3 p) {
+  vec2 e = vec2(0.02, -0.02);
+  return normalize(e.xyy * beast(p + e.xyy) + e.yyx * beast(p + e.yyx) + e.yxy * beast(p + e.yxy) + e.xxx * beast(p + e.xxx));
+}
+// Painted on: an amber eye with a slit that narrows in the light
+vec3 eyeColour(vec3 de, float on, float vis) {
+  vec3 up = normalize(vec3(0.0, EYE.z, -(EYE.y - 0.05)));
+  vec2 uv = vec2(de.x, dot(de, up)) / EYE_R;
+  float r = length(uv), shine = min(on * 2.2, 1.0) * (0.45 + 0.55 * vis);
+  if (r > 0.86) return HIDE[rung(shine * 0.3, 5)];
+  float slit = mix(0.4, 0.1, on) * sqrt(max(1.0 - uv.y * uv.y, 0.0));
+  if (abs(uv.x) < slit) return IRIS[0];
+  return IRIS[rung(shine * (1.1 - 0.45 * r), 4)];
+}
+
+// The lighthouse and the rock it stands on
+float rockPart(vec3 p) {
+  vec3 q = p - TOWER;
+  float d = egg(q, vec3(0.0, -0.08, 0.0), vec3(0.6, 0.3, 0.45));
+  d = smin(d, egg(q, vec3(-0.38, -0.1, 0.18), vec3(0.35, 0.19, 0.3)), 0.1);
+  return d - (noise(p * 9.0) - 0.5) * 0.06;
+}
+float towerPart(vec3 p) {
+  vec3 q = p - TOWER;
+  float d = rod(q, vec3(0.0, 0.1, 0.0), vec3(0.0, 0.7, 0.0), 0.1, 0.068);
+  d = min(d, rod(q, vec3(0.0, 0.7, 0.0), vec3(0.0, 0.72, 0.0), 0.095, 0.095));   // gallery
+  d = min(d, rod(q, vec3(0.0, 0.72, 0.0), vec3(0.0, 0.85, 0.0), 0.055, 0.055));  // lantern
+  return min(d, rod(q, vec3(0.0, 0.85, 0.0), vec3(0.0, 0.94, 0.0), 0.078, 0.004)); // cap
+}
+float lighthouse(vec3 p) { return min(rockPart(p), towerPart(p)); }
+vec3 lighthouseNormal(vec3 p) {
+  vec2 e = vec2(0.006, -0.006);
+  return normalize(e.xyy * lighthouse(p + e.xyy) + e.yyx * lighthouse(p + e.yyx) + e.yxy * lighthouse(p + e.yxy) + e.xxx * lighthouse(p + e.xxx));
+}
+
+// How much of the beam falls on a spot of the sea, by its bearing from the lamp
+float beamOn(vec3 p) {
+  vec2 v = p.xz - uLamp.xz; float r = length(v);
+  float c = dot(v / max(r, 1e-3), uHeading);
+  return smoothstep(cos(uWidth * 2.0), cos(uWidth * 1.0), c) * smoothstep(0.3, 1.3, r) * (0.3 + 0.7 * exp(-r * 0.09));
+}
+
+// The land: the sea, flat, with ripples that only really show where the beam lies
+float ripple(vec2 xz) { float R = uRound * 12.566371; return noise(vec3(xz.x * 1.4, xz.y * 4.5, 0.0) + vec3(0.7 * cos(R), 0.0, 0.7 * sin(R))); }
+
+// Beyond: a night sky, a shade paler at the horizon, with a few stars
+vec3 beyond(vec3 rd) {
+  vec3 col = clamp(rd.y * 3.0, 0.0, 1.0) > dots() ? SKY_TOP : SKY_LOW;
+  // The sky in pixels, so each star lands on one crisp pixel
+  float px = 2.0 * uFov / uRes.y;
+  vec2 sky = vec2(atan(rd.x, -rd.z), asin(rd.y)) / px;
+  // A faint milky band wandering across, mottled, where stars crowd thicker
+  float band = exp(-pow((rd.y - 0.075 - 0.035 * sin(sky.x * px * 4.0 + 0.8)) / 0.03, 2.0));
+  if (band * (0.3 + 0.7 * noise(vec3(sky * px * 9.0, 1.0))) * 0.8 > dots() + 0.2) col = vec3(0.04, 0.05, 0.09);
+  vec2 cell = floor(sky / 3.0), f = sky - cell * 3.0;
+  float h = hash(vec3(cell, 3.1)), hx = hash(vec3(cell, 8.7)), hy = hash(vec3(cell, 5.3)), hb = hash(vec3(cell, 1.9));
+  if (h > mix(0.14, 0.45, band) * smoothstep(0.0, 0.03, rd.y)) return col;
+  vec2 d = abs(f - (0.5 + 2.0 * vec2(hx, hy)));
+  // Most are faint; a few are bright, and those twinkle and wear a small cross
+  float b = hb * hb * hb, tw = 0.8 + 0.2 * sin(6.2831853 * (uRound * floor(2.0 + 3.0 * hx) + hy));
+  bool core = d.x < 0.5 && d.y < 0.5, arm = b > 0.45 && ((d.x < 0.5 && d.y < 1.5) || (d.y < 0.5 && d.x < 1.5));
+  vec3 tint = mix(vec3(0.8, 0.86, 1.0), vec3(1.0, 0.92, 0.78), step(0.75, hy));
+  float lum = core ? (b > 0.45 ? 0.95 * tw : b > 0.12 ? 0.55 : 0.28) : arm ? 0.3 * tw : 0.0;
+  return lum > 0.0 ? max(col, tint * lum) : col;
+}
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0;
+  vec3 ro = uCam, rd = normalize(uFwd + uRight * s.x * uFov * uRes.x / uRes.y + uUp * s.y * uFov);
+  float tSea = rd.y < 0.0 ? -ro.y / rd.y : 1e4, tEnd = tSea, tHit = -1.0;
+  vec3 col;
+
+  // Only rays that pass near the lighthouse need walking to it
+  vec3 oc = ro - (TOWER + vec3(0.0, 0.35, 0.0)); float b = dot(oc, rd), c = dot(oc, oc) - 0.85 * 0.85, disc = b * b - c;
+  if (disc > 0.0) {
+    float t = -b - sqrt(disc), tOut = min(-b + sqrt(disc), tSea);
+    for (int i = 0; i < 64 && t < tOut; i++) { float d = lighthouse(ro + rd * t); if (d < 0.002) { tHit = t; break; } t += d * 0.8; }
+  }
+
+  if (tHit > 0.0) {
+    tEnd = tHit;
+    vec3 p = ro + rd * tHit, n = lighthouseNormal(p), q = p - TOWER;
+    float dim = 0.2 + 0.4 * max(dot(n, normalize(vec3(-0.5, 0.6, 0.6))), 0.0);
+    if (towerPart(p) < rockPart(p)) {
+      if (q.y > 0.725 && q.y < 0.848) col = GLOW * (0.7 + 0.3 * max(dot(normalize(n.xz + 1e-4), uHeading), 0.0));   // the lamp, always lit
+      else if ((q.y > 0.3 && q.y < 0.4) || (q.y > 0.52 && q.y < 0.6)) col = PAINT[rung(dim, 3)];
+      else col = STONE[rung(dim + 0.2, 4)];
+    } else col = STONE[rung(dim * 0.6, 4)];
+  } else if (rd.y < 0.0) {
+    vec3 g = ro + rd * tSea;
+    float on = beamOn(g), rip = ripple(g.xz);
+    float v = on * (0.3 + 0.7 * rip * rip) + 0.07 * step(0.72, rip);
+    col = SEA[rung(v, 5)];
+
+    // Look down through the water for the thing; it shows only where the beam is on it
+    if (uC.w > 0.0 && on > 0.005) {
+      vec3 rw = refract(rd, vec3(0.0, 1.0, 0.0), 0.75);
+      float tMax = min(1.3 / -rw.y, 3.0), t = 0.0, tB = -1.0;
+      vec3 bc = g - uC.xyz; float bb = dot(bc, rw), cc = dot(bc, bc) - 12.96 * uC.w * uC.w;
+      if (bb * bb - cc > 0.0) {
+        for (int i = 0; i < 40 && t < tMax; i++) { float d = beast(g + rw * t); if (d < 0.004) { tB = t; break; } t += d * 0.8; }
+      }
+      if (tB > 0.0) {
+        vec3 p = g + rw * tB;
+        float on2 = beamOn(p), vis = exp(-max(-p.y, 0.0) * 1.6);
+        if (on2 > 0.02 && v < 0.62 && vis * 1.3 > dots()) {
+          vec3 q = uOwn * (p - uC.xyz) / uC.w, de = vec3(q.x, q.y, abs(q.z)) - EYE;
+          if (length(de) < EYE_R + 0.008) col = eyeColour(de, on2, vis);
+          else {
+            float lam = 0.5 + 0.5 * dot(beastNormal(p), normalize(uLamp - p + vec3(0.0, 1.5, 0.0)));
+            float hv = on2 * lam * (0.8 + 0.4 * (noise(q * 5.0) - 0.5)) * (0.4 + 0.6 * vis);
+            col = HIDE[rung(hv * 1.7, 5)];
+          }
+        }
+      }
+    }
+  } else col = beyond(rd);
+
+  // The beam itself, seen in the air: how near this ray passes to its middle
+  vec3 w0 = ro - uLamp;
+  float bb = dot(rd, uBeam), dd = dot(rd, w0), ee = dot(uBeam, w0), den = max(1.0 - bb * bb, 1e-4);
+  float sc = clamp((bb * ee - dd) / den, 0.0, tEnd);
+  float tc = dot(ro + rd * sc - uLamp, uBeam);
+  if (tc > 0.0) {
+    float dist = length(ro + rd * sc - uLamp - uBeam * tc), r = 0.012 + tc * tan(uWidth) * 0.45;
+    float glow = smoothstep(r, r * 0.1, dist) * exp(-tc * 0.12) * uHaze * 0.6;
+    col = mix(col, GLOW, float(rung(glow, 4)) / 3.0 * 0.5);
+  }
+  // and the lamp's halo, fierce when it looks your way
+  vec3 lp = uLamp - ro; float along = dot(lp, rd);
+  if (along < tEnd + 0.2) {
+    float facing = max(dot(uBeam, normalize(-w0)), 0.0);
+    float halo = smoothstep(0.1 + 0.25 * pow(facing, 6.0), 0.0, length(lp - rd * along)) * (0.5 + 0.5 * pow(facing, 4.0));
+    col = mix(col, GLOW, float(rung(halo, 4)) / 3.0);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uFov: { value: 0.42 }, uWidth: { value: 0.14 }, uHaze: { value: 1 }, uRound: { value: 0 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uCam: { value: V(0, 1.8, 3.6) },
+  uLamp: { value: V(1.7, 0.785, -1.0) }, uBeam: { value: V() }, uHeading: { value: new THREE.Vector2() },
+  uC: { value: new THREE.Vector4() }, uOwn: { value: new THREE.Matrix3() },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  uniforms.uFov.value = Math.max(0.42, 0.42 * rows / cols * 1.33);
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.004; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.002, -0.1, 0.3);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+// Four sweeps of the lamp, one turn each; the thing is a little closer every time, and then gone
+const SWEEP = 3;
+const S = sections({ shape: 3, back: 3, eye: 3, nothing: 3 });
+const P = params({
+  width: [0.14, 0.06, 0.3],   // how wide the beam is
+  haze: [1, 0, 2],            // how much the beam shows in the air
+  size: [2.2, 1.4, 3.2],      // how enormous the thing is
+});
+
+// Where it lies for each sweep: the spot its highest point sits at, which point that is on it, and how it is turned
+const STAGES = [
+  { at: [-2.6, -0.28, -4.2], top: [0, 0.57, 0], yaw: 0.5, pitch: 0, roll: 0 },
+  { at: [-1.6, -0.04, -1.6], top: [-0.1, 0.55, 0], yaw: -0.35, pitch: 0, roll: 0 },
+  { at: [-0.4, -0.08, 0.7], top: [2.0, 0.43, 0.55], yaw: 0.15, pitch: 0, roll: -0.63 },
+  null,
+];
+const rot = new THREE.Matrix4(), eul = new THREE.Euler(), top = V();
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = S.written(now), round = S.round(now), U = uniforms;
+  const i = Math.min(3, Math.floor(t / SWEEP)), tau = clamp(t - i * SWEEP, 0, SWEEP);
+
+  // Where you are looking from: low over the water, swaying a touch
+  const yaw = 0.04 * Math.sin(round * Math.PI * 2) + view.yaw, pitch = 0.3 + view.pitch;
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  U.uRound.value = round;
+
+  // The lamp turns once a sweep, starting just before it comes round into view
+  const a = -1.4 + Math.PI * 2 * tau / SWEEP;
+  U.uHeading.value.set(-Math.sin(a), -Math.cos(a));
+  U.uBeam.value.set(-Math.sin(a), -0.035, -Math.cos(a)).normalize();
+  U.uWidth.value = P.width; U.uHaze.value = P.haze;
+
+  // The thing, placed for this sweep and creeping nearer while it is dark
+  const st = STAGES[i];
+  if (!st) U.uC.value.set(0, -50, 0, 0);
+  else {
+    const k = P.size;
+    rot.makeRotationFromEuler(eul.set(st.roll, st.yaw, st.pitch, 'YZX'));
+    top.set(...st.top).applyMatrix4(rot).multiplyScalar(k);
+    U.uC.value.set(st.at[0] - top.x, st.at[1] - top.y, st.at[2] + 0.2 * tau / SWEEP - top.z, k);
+    U.uOwn.value.setFromMatrix4(rot).transpose();
+  }
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

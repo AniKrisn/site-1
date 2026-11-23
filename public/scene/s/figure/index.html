@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795368659878;window.__values={};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795381997498;window.__values={"size":0.9,"move":1,"pace":4,"across":false,"heads":6};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
 (() => {
   const errors = window.__errors = [];
   const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
@@ -143,11 +143,41 @@ addEventListener('pointercancel', release);
 const LOOP = 4;
 const P = params({
   size: [0.9, 0.4, 1.2],                              // how tall the figure is
-  move: { value: 0, min: 0, max: 2, step: 1 },        // 0 walks, 1 runs, 2 swims
-  across: false,                                      // goes across the page, not on the spot
+  move: { value: 0, min: 0, max: 2, step: 1 },        // 0 walks, 1 sprints, 2 swims
+  pace: { value: 2, min: 1, max: 8, step: 1 },        // how many cycles of it fit in the loop
+  across: false,                                     // goes across the page, not on the spot
   heads: { value: 6, min: 4, max: 8, step: 0.5 },     // how many of its own heads tall it is
 });
 let man = figure({ heads: 6 }), made = 6;
+
+// A smooth path through evenly spaced points, k from 0 to 1
+function through(pts, k) {
+  const n = pts.length - 1, x = clamp(k, 0, 1) * n, i = Math.min(n - 1, Math.floor(x)), f = x - i;
+  const a = pts[Math.max(0, i - 1)], b = pts[i], c = pts[i + 1], d = pts[Math.min(n, i + 2)];
+  return b.map((v, j) => 0.5 * (2 * v + (c[j] - a[j]) * f + (2 * a[j] - 5 * v + 4 * c[j] - d[j]) * f * f + (3 * v - a[j] - 3 * c[j] + d[j]) * f * f * f));
+}
+// A sprint: the run's hips and planted feet, with the free leg folded heel to seat then driven knee high, and the arms pumping
+const DOWN = 0.38, STRIDE = 0.56;   // the share of a run's cycle a foot is on the ground, and how far apart the feet land
+function sprint(u) {
+  const pose = man.run(u, { length: STRIDE }), B = man.bones;
+  // The hips ride nearly level, as high as the stride allows, sinking only a little over each planted foot
+  pose.hip[1] = B.ankle + Math.sqrt((B.leg - 0.008) ** 2 - (STRIDE / 2) ** 2) - 0.008 * (1 - Math.cos((u - 0.44) * Math.PI * 4));
+  const floor = -(pose.hip[1] - B.ankle);
+  for (const [side, start] of [['L', 0], ['R', 0.5]]) {
+    const at = (((u + start) % 1) + 1) % 1;
+    if (at >= DOWN) {
+      // Heel up behind, tucked through under the hips, knee forward, then the foot reaches out and comes down gently
+      const [x, y] = through([[-STRIDE / 2, floor], [-0.26, -0.23], [-0.07, -0.16], [0.15, -0.22], [0.26, -0.3], [STRIDE / 2, floor]], (at - DOWN) / (1 - DOWN));
+      pose['foot' + side] = [x, Math.max(y, floor), 0];
+    } else pose['foot' + side][1] = floor;
+    // The hand comes up in front of the face with the elbow folded as its own leg pushes off, and opens out well behind the hip as it lands
+    const fore = 0.5 + 0.5 * Math.cos((at - DOWN) * Math.PI * 2), angle = -0.8 + 2.7 * fore, far = 0.23 - 0.06 * fore;
+    pose['hand' + side] = [far * Math.sin(angle), -far * Math.cos(angle), 0.045 - 0.04 * fore];
+  }
+  // The chest stays square and proud: less hunch, and the shoulders turn only a little with the arms
+  pose.lean = 0.2; pose.nod = -0.1; pose.twist *= 0.5;
+  return pose;
+}
 
 function frame(now) {
   if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
@@ -162,9 +192,9 @@ function frame(now) {
   U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
 
   if (P.heads !== made) man = figure({ heads: made = P.heads });
-  // Two cycles a loop, whichever it is doing; going across, it covers exactly the ground its feet say it does
-  const u = t / LOOP * 2, pose = P.move === 0 ? man.walk(u) : P.move === 1 ? man.run(u) : man.crawl(u, { depth: 0.12 });
-  const far = P.move === 2 ? 0.5 : pose.travel, gone = P.across ? far * (u - 1) : 0;
+  // A whole number of cycles a loop, whichever it is doing; going across, it covers exactly the ground its feet say it does
+  const u = t / LOOP * P.pace, pose = P.move === 0 ? man.walk(u) : P.move === 1 ? sprint(u) : man.crawl(u, { depth: 0.12 });
+  const far = P.move === 2 ? 0.5 : pose.travel, gone = P.across ? far * (u - P.pace / 2) : 0;
   pose.hip = [pose.hip[0] + gone, pose.hip[1], pose.hip[2]];
   man.joints(pose, U.uJ.value);
   U.uHead.value = man.bones.head;

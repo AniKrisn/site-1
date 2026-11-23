@@ -10,7 +10,7 @@ function Primitives() {
         <article className="post-text">
           <h1>Primitives</h1>
           <p>
-            1. Complexity <i>grows</i> from an initial set of primitives and
+            1. Complexity grows from an initial set of primitives and
             some scaling process.
           </p>
           <p>

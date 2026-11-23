@@ -111,15 +111,13 @@ function tick() {
         const dx = wx - o.x;
         const dy = wy - o.y;
         if (o.hard) {
-          // Static obstacle: the word must fully clear its ink sideways.
+          // Static obstacle: the word steps past its ink to the right, and
+          // the rest of the line follows, so the left margin holds and the
+          // line simply opens where the obstacle stands.
           const reach = o.r + 12;
           if (Math.abs(dy) < reach) {
             const hw = Math.sqrt(reach * reach - dy * dy) + w.halfW;
-            if (Math.abs(dx) < hw) {
-              const need = Math.min(130, hw - Math.abs(dx));
-              if (dx >= 0) w.hardR = Math.max(w.hardR, need);
-              else w.hardL = Math.max(w.hardL, need);
-            }
+            if (Math.abs(dx) < hw) w.hardR = Math.max(w.hardR, Math.min(220, hw - dx));
           }
         } else {
           const d = Math.hypot(dx, dy);

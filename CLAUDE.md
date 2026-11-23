@@ -70,7 +70,7 @@ rsync -a --delete dist-web/ ~/Documents/code/site_simple/public/scene/
 The build reads the tldraw licence key from the app's `.env.local`
 (`VITE_TLDRAW_LICENSE_KEY`, the same key Code editor uses). Scenes in the
 app's Trash are left out, and so are the conversations with the agent.
-It is ~7.5 MB, half of it ink-studio's toolkit, which only the scenes
+It is ~8 MB, half of it ink-studio's toolkit, which only the scenes
 written on it need.
 
 ## Weight, and when a project should get its own deployment

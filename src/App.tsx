@@ -27,6 +27,28 @@ const projects: ProjectItem[] = [
     mobileHref: "https://github.com/AniKrisn/code-editor/",
   },
   {
+    title: "Scene",
+    thumb: "/thumbs/scene.jpg",
+    slug: "/scene/",
+    // read-only and wants a wide screen, but it loads anywhere, so the
+    // phone gets the same page rather than a missing entry
+    mobileHref: "/scene/",
+  },
+  {
+    title: "Cache",
+    thumb: "/thumbs/cache.jpg",
+    slug: "/cache/",
+    mobileHref: "/cache/",
+  },
+  {
+    title: "Marks",
+    thumb: "/thumbs/marks.jpg",
+    slug: "/marks/",
+    // needs a wide screen, but it loads anywhere and the repo is private,
+    // so the phone gets the same page rather than a 404
+    mobileHref: "/marks/",
+  },
+  {
     title: "Beetle",
     thumb: "/thumbs/beetle.jpg",
     slug: "/beetle/",
@@ -41,37 +63,22 @@ const projects: ProjectItem[] = [
     mobileHref: "/ligne-claire/",
   },
   {
-    title: "Marks",
-    thumb: "/thumbs/marks.jpg",
-    slug: "/marks/",
-    // needs a wide screen, but it loads anywhere and the repo is private,
-    // so the phone gets the same page rather than a 404
-    mobileHref: "/marks/",
-  },
-  {
-    title: "Cache",
-    thumb: "/thumbs/cache.jpg",
-    slug: "/cache/",
-    mobileHref: "/cache/",
-  },
-  {
     title: "Contraptions",
     thumb: "/thumbs/contraptions.jpg",
     // outbound: its own Worker, see the own-deployment note in CLAUDE.md
     slug: "https://rb-machine.anikrishnantango.workers.dev/",
     mobileHref: "https://rb-machine.anikrishnantango.workers.dev/",
   },
-  {
-    title: "Scene",
-    thumb: "/thumbs/scene.jpg",
-    slug: "/scene/",
-    // read-only and wants a wide screen, but it loads anywhere, so the
-    // phone gets the same page rather than a missing entry
-    mobileHref: "/scene/",
-  },
 ];
 
 const games: ProjectItem[] = [
+  {
+    title: "Pocket Captains",
+    thumb: "/thumbs/pocket-captains.jpg",
+    // outbound: its own Worker and multiplayer rooms, like Cenote
+    slug: "https://pocket-captains.anikrishnantango.workers.dev/",
+    mobileHref: "https://pocket-captains.anikrishnantango.workers.dev/",
+  },
   {
     title: "The Ferryman",
     thumb: "/thumbs/ferryman.jpg",
@@ -95,13 +102,6 @@ const games: ProjectItem[] = [
     thumb: "/thumbs/overgrowth.jpg",
     slug: "/overgrowth/",
     // no mobileHref: cutting is a precise drag at high zoom, otherwise a phone just pans
-  },
-  {
-    title: "Pocket Captains",
-    thumb: "/thumbs/pocket-captains.jpg",
-    // outbound: its own Worker and multiplayer rooms, like Cenote
-    slug: "https://pocket-captains.anikrishnantango.workers.dev/",
-    mobileHref: "https://pocket-captains.anikrishnantango.workers.dev/",
   },
 ];
 

@@ -1,0 +1,484 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795390004010;window.__values={"waves":0.128,"flash":0.405};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+(() => {
+  const errors = window.__errors = [];
+  const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
+  const note = text => {
+    text = String(text).slice(0, 1500);
+    if (errors[errors.length - 1] === text) return;   // otherwise a frame that throws fills the list sixty times a second
+    errors.push(text);
+    tell();
+  };
+  // Lines are counted from the top of the scene's own file, not from the page it is served in
+  addEventListener('error', e => note(e.message + (e.lineno ? ` (line ${e.lineno - (window.__offset || 0)})` : '')));
+  addEventListener('unhandledrejection', e => note(e.reason?.stack ?? e.reason));
+  const error = console.error;
+  console.error = (...args) => { note(args.join(' ')); error.apply(console, args); };
+})();
+</script><script type="importmap">{"imports":{"three":"../../lib/three.js","scene":"../../lib/scene.js","kit":"../../lib/kit.js","figure":"../../lib/figure.js"}}</script></head><body>
+<meta charset="utf-8">
+<title>Storm in a teacup</title>
+<style>
+  /* Layout: a white page with one thing on it, drawn in chunky pixels. Deliberately light-only. */
+  :root { --bg: #ffffff; color-scheme: light; }
+  html, body { height: 100%; }
+  body { background: var(--bg); overflow: hidden; }
+  #stage {
+    position: fixed; left: 0; top: 0; display: block;
+    image-rendering: pixelated;
+    touch-action: none; cursor: grab;
+  }
+  #stage.turning { cursor: grabbing; }
+</style>
+
+<canvas id="stage" aria-label="An eleven second loop. A porcelain teacup on its saucer holds a storm at sea: a tiny ship climbs dark waves, lightning lights the cup, a sugar cube falls in like a meteor and its wave nearly throws the ship over the rim, then it all settles to plain tea before the storm builds again."></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { params, loop, sections } from 'scene';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// Nothing here is a mesh: every pixel walks a ray to a shape described by distance
+const frag = /* glsl */`
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uRight, uUp, uFwd, uTarget, uLight;
+uniform float uSpan, uStorm, uLip, uFlash, uBoltOn, uTeaMix;
+uniform vec3 uPh, uTea, uShipPos, uTrailA, uTrailB;
+uniform vec4 uRing, uSugar;
+uniform mat3 uShip, uCube;
+uniform vec4 uDrops[5];
+uniform vec3 uBolt[6];
+uniform float uSwirl, uTwist, uVortex, uSpoonOn;   // how far the tea has turned, how much more at the middle, how deep the whirl
+uniform vec3 uSpoonA, uSpoonD, uSpoonS;            // the spoon's bowl, the way its handle runs, and its side
+const vec3 SILVER[5] = vec3[5](vec3(0.2, 0.21, 0.25), vec3(0.4, 0.42, 0.47), vec3(0.62, 0.64, 0.69), vec3(0.84, 0.85, 0.88), vec3(1.0));
+
+// Porcelain, the gilt on it, the sea, the ship's wood and canvas
+const vec3 PORC[5] = vec3[5](vec3(0.43, 0.46, 0.57), vec3(0.62, 0.65, 0.75), vec3(0.79, 0.81, 0.88), vec3(0.91, 0.92, 0.95), vec3(0.995, 0.995, 0.985));
+const vec3 GILT[4] = vec3[4](vec3(0.45, 0.29, 0.09), vec3(0.68, 0.49, 0.17), vec3(0.87, 0.71, 0.33), vec3(1.0, 0.93, 0.64));
+const vec3 SEA[5] = vec3[5](vec3(0.035, 0.06, 0.08), vec3(0.08, 0.14, 0.16), vec3(0.15, 0.24, 0.26), vec3(0.27, 0.38, 0.39), vec3(0.8, 0.87, 0.86));
+const vec3 WOOD[4] = vec3[4](vec3(0.13, 0.05, 0.04), vec3(0.28, 0.11, 0.07), vec3(0.45, 0.21, 0.1), vec3(0.63, 0.34, 0.17));
+const vec3 SAIL[4] = vec3[4](vec3(0.46, 0.43, 0.41), vec3(0.7, 0.66, 0.58), vec3(0.88, 0.85, 0.76), vec3(1.0, 0.98, 0.92));
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+const float RIM = 0.33;                      // height of the cup's lip
+const vec3 BOWL = vec3(0.36, 0.28, 0.36);    // the bowl is the lower half of this egg, centred at the lip
+const float WALL = 0.009;                    // half the thickness of the porcelain
+const float LEVEL = 0.2;                   // where the tea stands when it is still
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float ball(vec3 p, vec3 c, float r) { return length(p - c) - r; }
+float egg(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; float k0 = length(q), k1 = length(q / r); return k0 * (k0 - 1.0) / max(k1, 1e-4); }
+float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
+  vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - mix(ra, rb, h);
+}
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float tri(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
+  vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2, v0 = p - p0, v1 = p - p1, v2 = p - p2;
+  vec2 q0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+  vec2 q1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+  vec2 q2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+  float s = sign(e0.x * e2.y - e0.y * e2.x);
+  vec2 d = min(min(vec2(dot(q0, q0), s * (v0.x * e0.y - v0.y * e0.x)), vec2(dot(q1, q1), s * (v1.x * e1.y - v1.y * e1.x))), vec2(dot(q2, q2), s * (v2.x * e2.y - v2.y * e2.x)));
+  return -sqrt(d.x) * sign(d.y);
+}
+// A flat shape given thickness
+float slab(float d2, float z, float th) { vec2 w = vec2(d2, abs(z) - th); return min(max(w.x, w.y), 0.0) + length(max(w, 0.0)); }
+
+// The thing: cup and saucer, the sea in the cup, the ship on it, and the sugar
+float bowlOuter(vec3 p) {
+  float flare = 1.0 + 0.06 * smoothstep(RIM - 0.12, RIM, p.y);   // the lip turns out a little
+  return egg(vec3(p.x / flare, p.y, p.z / flare), vec3(0.0, RIM, 0.0), BOWL);
+}
+float cup(vec3 p, float o) {
+  vec2 w = vec2(abs(o + WALL) - WALL, p.y - RIM);
+  float d = min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+  vec2 f = vec2(length(p.xz) - 0.13, abs(p.y - 0.046) - 0.02);
+  d = smin(d, min(max(f.x, f.y), 0.0) + length(max(f, 0.0)) - 0.004, 0.03);   // foot
+  vec3 h = p - vec3(0.385, 0.215, 0.0);
+  float ring = length(vec2(length(vec2(h.x, h.y * 1.15)) - 0.07, h.z)) - 0.017;
+  return smin(d, max(ring, -o), 0.018);                                         // handle, only outside the bowl
+}
+float saucerTop(float r) { return 0.022 + 0.045 * smoothstep(0.16, 0.56, r); }
+float saucer(vec3 p) {
+  float r = length(p.xz);
+  vec2 w = vec2((abs(p.y - saucerTop(r) + 0.011) - 0.011) * 0.96, r - 0.56);
+  return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+}
+// A spot carried back round against the stirring, so the swells turn with the tea, faster near the middle
+vec2 swirled(vec2 q) {
+  float a = -(uSwirl + uTwist * (0.33 - length(q)) / 0.33), c = cos(a), s = sin(a);
+  return vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+}
+// How high the sea stands at a spot: three swells turning with the tea, the whirl's hollow, and the ring from the sugar
+float waves(vec2 q) {
+  vec2 k = swirled(q);
+  float h = uStorm * (0.026 * sin(dot(k, vec2(17.0, 9.0)) - uPh.x) + 0.014 * sin(dot(k, vec2(-8.0, 21.0)) - uPh.y) + 0.008 * sin(dot(k, vec2(29.0, -13.0)) - uPh.z));
+  h += uVortex * 0.55 * (dot(q, q) - 0.055);
+  float w = length(q - uRing.xy) - uRing.z;
+  return h + uRing.w * cos(w * 30.0) * exp(-w * w * 70.0);
+}
+float tea(vec3 p, float o) {
+  if (o > 0.02) return o + WALL;   // well outside the bowl, no need to work out the waves
+  float above = p.y - LEVEL;
+  float s = above > 0.14 ? above - 0.13 : (above - waves(p.xz)) * uLip;
+  return max(s, o + WALL);
+}
+// The ship in its own space: x to the bow, y up the mast. x hull and mast, y sails, z the pennant
+const float SHIP = 1.25;   // how much larger the ship is than it was modelled
+vec3 ship(vec3 p) {
+  vec3 r = p - uShipPos; float far = length(r);
+  if (far > 0.15 * SHIP) return vec3(far - 0.12 * SHIP);
+  vec3 q = uShip * r / SHIP;
+  float pinch = 1.0 - 0.55 * smoothstep(-0.01, 0.066, q.x);
+  float hull = egg(vec3(q.x, q.y, q.z / pinch), vec3(0.0), vec3(0.066, 0.032, 0.024)) * pinch;
+  hull = max(hull, q.y - 0.004 - 0.016 * (q.x / 0.066) * (q.x / 0.066));   // deck sweeping up at bow and stern
+  hull = min(hull, rod(q, vec3(0.006, 0.0, 0.0), vec3(0.006, 0.092, 0.0), 0.0045, 0.0035));
+  float sail = slab(tri(q.xy, vec2(0.0, 0.024), vec2(0.0, 0.086), vec2(-0.054, 0.026)), q.z - 0.01 * sin(clamp(-q.x / 0.054, 0.0, 1.0) * 3.14), 0.003);
+  float jib = slab(tri(q.xy, vec2(0.013, 0.08), vec2(0.013, 0.026), vec2(0.066, 0.016)), q.z - 0.006 * sin(clamp((q.x - 0.013) / 0.053, 0.0, 1.0) * 3.14), 0.003);
+  float flag = slab(tri(q.xy, vec2(0.006, 0.093), vec2(0.006, 0.081), vec2(-0.03, 0.088)), q.z, 0.003);
+  return vec3(hull, min(sail, jib), flag) * SHIP;
+}
+float sugar(vec3 p) {
+  if (uSugar.w <= 0.0) return 1e3;
+  vec3 b = abs(uCube * (p - uSugar.xyz)) - vec3(0.021);
+  return length(max(b, 0.0)) + min(max(b.x, max(b.y, b.z)), 0.0) - 0.005;
+}
+float drops(vec3 p) { float d = 1e3; for (int i = 0; i < 5; i++) if (uDrops[i].w > 0.0) d = min(d, ball(p, uDrops[i].xyz, uDrops[i].w)); return d; }
+// A teaspoon: a shallow bowl, a slim neck, and a handle widening to a flat oval end
+float spoon(vec3 p) {
+  if (uSpoonOn < 0.5) return 1e3;
+  vec3 r = p - uSpoonA, n = cross(uSpoonD, uSpoonS);
+  vec3 q = vec3(dot(r, uSpoonD), dot(r, uSpoonS), dot(r, n));
+  float bowl = egg(q, vec3(0.0), vec3(0.05, 0.032, 0.011));
+  float handle = rod(q, vec3(0.04, 0.0, 0.0), vec3(0.44, 0.0, 0.0), 0.005, 0.008);
+  float end = egg(q, vec3(0.46, 0.0, 0.0), vec3(0.045, 0.019, 0.007));
+  return smin(smin(bowl, handle, 0.012), end, 0.03);
+}
+float map(vec3 p) {
+  float o = bowlOuter(p);
+  float d = min(min(cup(p, o), saucer(p)), tea(p, o));
+  vec3 sh = ship(p);
+  return min(min(min(d, spoon(p)), min(sh.x, min(sh.y, sh.z))), min(sugar(p), drops(p)));
+}
+// What a point on the surface is made of
+int matAt(vec3 p) {
+  float o = bowlOuter(p), best = cup(p, o), d; int id = 0;
+  d = saucer(p); if (d < best) { best = d; id = 1; }
+  d = tea(p, o); if (d < best) { best = d; id = 2; }
+  vec3 sh = ship(p);
+  if (sh.x < best) { best = sh.x; id = 3; }
+  if (sh.y < best) { best = sh.y; id = 4; }
+  if (sh.z < best) { best = sh.z; id = 5; }
+  d = sugar(p); if (d < best) { best = d; id = 6; }
+  d = drops(p); if (d < best) { best = d; id = 7; }
+  d = spoon(p); if (d < best) { best = d; id = 8; }
+  return id;
+}
+
+vec3 normalAt(vec3 p) {
+  vec2 e = vec2(0.0025, -0.0025);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+// How much of the light reaches a point, soft at the edges
+float lightAt(vec3 ro) {
+  float res = 1.0, t = 0.01;
+  for (int i = 0; i < 26; i++) {
+    float d = map(ro + uLight * t);
+    res = min(res, 10.0 * d / t);
+    t += clamp(d, 0.008, 0.08);
+    if (res < 0.01 || t > 1.2) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+// Steps between neighbouring tones in a fixed pattern, so shading is dots, not blends
+float dots() { ivec2 c = ivec2(gl_FragCoord.xy) & 3; return (BAYER[c.y * 4 + c.x] + 0.5) / 16.0; }
+float stepped(float t, float steps) { float x = clamp(t, 0.0, 1.0) * steps; return min(floor(x) + (fract(x) > dots() ? 1.0 : 0.0), steps) / steps; }
+int rung(float t, int steps) { float x = clamp(t, 0.0, 1.0) * float(steps); return min(int(x) + (fract(x) > dots() ? 1 : 0), steps); }
+// Tones in clean bands, with dots only in a narrow seam where one meets the next: for broad smooth surfaces
+int band(float t, int steps) { float x = clamp(t, 0.0, 1.0) * float(steps); return min(int(x) + (smoothstep(0.3, 0.7, fract(x)) > dots() ? 1 : 0), steps); }
+// What the liquid mirrors: the room where the reflected ray clears the lip, the inside of the cup where it doesn't
+float mirrored(vec3 p, vec3 r) {
+  vec2 o = p.xz, d = r.xz; float a = dot(d, d), b = dot(o, d), c = dot(o, o) - 0.37 * 0.37;
+  float s = (-b + sqrt(max(b * b - a * c, 0.0))) / max(a, 1e-4);
+  return p.y + r.y * s > RIM ? 1.0 : 0.3;
+}
+// The sea's ramp turning into the tea's as the storm dies
+vec3 liquid(int i) {
+  vec3 teaTone = i == 4 ? mix(uTea * 1.5, vec3(1.0, 0.96, 0.88), 0.6) : uTea * (0.42 + 0.29 * float(i));
+  return mix(SEA[i], teaTone, uTeaMix);
+}
+// Where a ray passes nearest a segment: how near, how far along the ray, how far along the segment
+vec3 segRay(vec3 ro, vec3 rd, vec3 a, vec3 b) {
+  vec3 ba = b - a, oa = ro - a;
+  float d = dot(rd, ba), e = dot(ba, ba), f = dot(oa, rd), g = dot(oa, ba);
+  float h = clamp((g - f * d) / max(e - d * d, 1e-6), 0.0, 1.0), t = d * h - f;
+  return vec3(length(ro + rd * t - a - ba * h), t, h);
+}
+
+// The land: what the thing stands on and its shadow falls on. Here a flat white page, with nothing beyond it.
+vec3 landAt(vec3 g, vec2 s, float shade) { return vec3(1.0 - 0.22 * shade); }
+
+void main() {
+  vec2 s = (gl_FragCoord.xy / uRes) * 2.0 - 1.0, at = vec2(s.x * uSpan * uRes.x / uRes.y, s.y * uSpan);
+  vec3 ro = uTarget + uRight * at.x + uUp * at.y - uFwd * 5.0, rd = uFwd;
+  vec3 col = vec3(1.0);
+  float tFloor = -ro.y / rd.y, tHit = -1.0, t = max(0.0, (ro.y - 1.6) / -rd.y);
+  // Only rays that pass near the cup and saucer, or the falling sugar, need walking
+  vec3 oc = ro - vec3(0.0, 0.3, 0.0); float b = dot(oc, rd), disc = b * b - dot(oc, oc) + 0.85 * 0.85;
+  vec3 sc = ro - uSugar.xyz; float sb = dot(sc, rd), sd = sb * sb - dot(sc, sc) + 0.05 * 0.05;
+  if (disc > 0.0 && !(uSugar.w > 0.0 && sd > 0.0)) t = max(t, -b - sqrt(disc));
+  else if (disc <= 0.0 && !(uSugar.w > 0.0 && sd > 0.0)) t = tFloor;
+  for (int i = 0; i < 120 && t < tFloor; i++) {
+    float d = map(ro + rd * t);
+    if (d < 0.0012) { tHit = t; break; }
+    t += d * 0.85;
+  }
+  if (tHit > 0.0) {
+    vec3 p = ro + rd * tHit, n = normalAt(p);
+    int id = matAt(p);
+    float lamp = lightAt(p + n * 0.006);
+    float lit = max(dot(n, uLight), 0.0) * lamp, edge = 1.0 - abs(dot(n, rd));
+    float spec = pow(max(dot(reflect(rd, n), uLight), 0.0), 24.0) * lamp;
+    float nook = clamp(0.5 + 0.5 * map(p + n * 0.04) / 0.04, 0.0, 1.0);
+    if (id <= 1) {
+      // Porcelain: white where the lamp is, cool grey turning away, darker at the outline so it stands off the page
+      float o = bowlOuter(p), r = length(p.xz);
+      float inner = id == 0 && o < -WALL && p.y > 0.1 ? 1.0 : 0.0;
+      float tone = (0.2 + 0.68 * lit + 0.1 * n.y - 0.3 * edge * edge) * mix(1.0, nook, 0.7) + spec * 0.7 * (1.0 - inner * (1.0 - uTeaMix)) + inner * (uFlash * 0.12 - (1.0 - uTeaMix) * 0.55);   // the storm darkens the inside of the cup like a sky
+      bool gilt = id == 0 ? (p.y > RIM - 0.004 || (o > -WALL && p.y > RIM - 0.04 && p.y < RIM - 0.026))
+                          : (r > 0.505 && r < 0.535 && p.y > saucerTop(r) - 0.006);
+      if (gilt) col = GILT[rung(0.15 + 0.5 * lit + 0.9 * pow(max(dot(reflect(rd, n), uLight), 0.0), 6.0) * lamp + inner * uFlash * 0.5, 3)];
+      else col = PORC[band(tone, 4)];
+    } else if (id == 2 || id == 7) {
+      // Dark heaving water with broken foam along the crests, or still tea mirroring the cup's lip
+      float h = waves(p.xz), w = length(p.xz - uRing.xy) - uRing.z;
+      float crest = smoothstep(0.72, 0.97, sin(dot(swirled(p.xz), vec2(17.0, 9.0)) - uPh.x)) * smoothstep(0.008, 0.03, h - uVortex * 0.55 * (dot(p.xz, p.xz) - 0.055));
+      crest += smoothstep(0.5, 1.0, cos(w * 30.0) * exp(-w * w * 70.0)) * clamp(uRing.w * 40.0, 0.0, 1.0);
+      float foam = crest * (0.4 + 0.9 * hash(vec3(floor(p.xz * 70.0), 1.0))) + (id == 7 ? 0.8 : 0.0);
+      float sky = mirrored(p, reflect(rd, n));
+      float storm = 0.04 + 0.42 * lit + 0.2 * sky + 0.8 * foam;
+      float still = 0.12 + 0.25 * lit + 0.45 * sky;
+      float tone = mix(storm, still, uTeaMix) * mix(1.0, nook, 0.5 - 0.4 * uTeaMix) + uFlash * (0.12 + 0.25 * n.y);
+      col = liquid(uTeaMix > 0.5 ? band(tone, 4) : rung(tone, 4));   // still tea in clean bands, the sea broken up
+      if (id == 7) col = liquid(lit > 0.3 ? 4 : 3);                   // flung drops are all spray
+    } else if (id == 3) col = WOOD[rung(0.12 + 0.75 * lit + uFlash * 0.4, 3)];
+    else if (id == 4) col = SAIL[rung(0.3 + 0.75 * abs(dot(n, uLight)) * lamp + uFlash * 0.4, 3)];
+    else if (id == 5) col = vec3(0.78, 0.16, 0.12);
+    else if (id == 8) {
+      // Silver: mostly what it mirrors, dark along the middle and bright at the turned edges and the lamp's glint
+      float shine = pow(max(dot(reflect(rd, n), uLight), 0.0), 10.0) * lamp;
+      col = SILVER[rung(0.2 + 0.3 * lit + 0.35 * edge + 0.8 * shine + uFlash * 0.4, 4)];
+    } else {
+      // Sugar: grainy white, its faces in three tones
+      float grain = (hash(floor(p * 260.0)) - 0.5) * 0.18;
+      col = PORC[rung(0.45 + 0.65 * lit - 0.2 * edge + grain, 4)];
+    }
+  } else if (tFloor > 0.0) {
+    vec3 g = ro + rd * tFloor;
+    float dim = length(g.xz) > 1.1 ? 0.0 : 1.0 - lightAt(g + vec3(0.0, 0.01, 0.0));
+    col = landAt(g, s, stepped(dim * 0.85, 2.0));
+  }
+  float depth = tHit > 0.0 ? tHit : tFloor;
+  // The lightning: a bright jagged line with a dotted glow, drawn over whatever is behind it
+  if (uBoltOn > 0.5) {
+    float near = 1e3;
+    for (int i = 0; i < 5; i++) { vec3 r = segRay(ro, rd, uBolt[i], uBolt[i + 1]); if (r.y < depth) near = min(near, r.x); }
+    if (near < 0.0045 && dots() > 0.2) col = mix(col, vec3(0.94, 0.96, 1.0), 0.75);   // a faint broken thread, barely there
+  }
+  // The sugar's tail as it falls, thinning and breaking up into dots
+  if (uSugar.w > 0.0 && distance(uTrailA, uTrailB) > 0.01) {
+    vec3 r = segRay(ro, rd, uTrailA, uTrailB);
+    float fade = 1.0 - r.z;
+    if (r.y < depth && r.x < mix(0.016, 0.004, r.z) && fade * fade * 1.15 > dots()) col = r.z < 0.3 ? vec3(1.0, 0.9, 0.6) : vec3(0.97, 0.66, 0.32);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: false });
+renderer.setPixelRatio(1);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const uniforms = {
+  uRes: { value: new THREE.Vector2(1, 1) }, uSpan: { value: 0.62 },
+  uRight: { value: V() }, uUp: { value: V() }, uFwd: { value: V() }, uTarget: { value: V(0, 0.2, 0) }, uLight: { value: V() },
+  uStorm: { value: 1 }, uLip: { value: 1 }, uFlash: { value: 0 }, uBoltOn: { value: 0 }, uTeaMix: { value: 0 },
+  uPh: { value: V() }, uTea: { value: new THREE.Color() }, uShipPos: { value: V() }, uTrailA: { value: V() }, uTrailB: { value: V() },
+  uRing: { value: new THREE.Vector4() }, uSugar: { value: new THREE.Vector4() },
+  uShip: { value: new THREE.Matrix3() }, uCube: { value: new THREE.Matrix3() },
+  uDrops: { value: Array.from({ length: 5 }, () => new THREE.Vector4()) },
+  uBolt: { value: Array.from({ length: 6 }, () => V()) },
+  uSwirl: { value: 0 }, uTwist: { value: 0 }, uVortex: { value: 0 }, uSpoonOn: { value: 0 },
+  uSpoonA: { value: V() }, uSpoonD: { value: V(0, 1, 0) }, uSpoonS: { value: V(1, 0, 0) },
+};
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const page = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms, fragmentShader: frag, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', depthTest: false,
+}));
+page.frustumCulled = false;
+scene.add(page);
+
+let cols = 1, rows = 1, sizedW = -1, sizedH = -1, baseSpan = 0.58;
+function resize() {
+  // A hidden pane reports no size; draw for a plausible one until it has one
+  const w = innerWidth || 1280, h = innerHeight || 800;
+  const scale = Math.max(3, Math.round(Math.min(w * 1.3, h) / 104));
+  cols = Math.ceil(w / scale); rows = Math.ceil(h / scale);
+  renderer.setSize(cols, rows, false);
+  stage.style.width = cols * scale + 'px'; stage.style.height = rows * scale + 'px';
+  uniforms.uRes.value.set(cols, rows);
+  baseSpan = Math.max(0.72, 0.8 * rows / cols);   // wide enough that a square frame still holds the saucer
+}
+
+// Dragging only shifts where you watch from; the loop itself answers to nothing
+const view = { yaw: 0, pitch: 0.55 };
+const drag = { down: false, x: 0, y: 0 };
+stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); Object.assign(drag, { down: true, x: e.clientX, y: e.clientY }); stage.classList.add('turning'); });
+addEventListener('pointermove', e => {
+  if (!drag.down) return;
+  view.yaw -= (e.clientX - drag.x) * 0.008; view.pitch = clamp(view.pitch + (e.clientY - drag.y) * 0.004, 0.15, 1.2);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const release = () => { drag.down = false; stage.classList.remove('turning'); };
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+
+const EASE = {
+  lin: x => x, io: x => x < 0.5 ? 4 * x * x * x : 1 - (2 - 2 * x) ** 3 / 2, in: x => x * x * x, out: x => 1 - (1 - x) ** 3,
+  snap: x => 1 - (1 - x) ** 5, fall: x => x ** 4,
+};
+// A track is a list of [when, value, how to arrive]; between entries it moves, after the last it stays
+function key(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) if (t < track[i][0]) {
+    const [t0, a] = track[i - 1], [t1, b, how = 'io'] = track[i];
+    return a + (b - a) * EASE[how]((t - t0) / (t1 - t0));
+  }
+  return track[track.length - 1][1];
+}
+const bump = (t, at, len) => t > at && t < at + len ? Math.sin((t - at) / len * Math.PI) : 0;
+
+// The story, part by part; everything below is keyed to the time as written
+const S = sections({ calm: 2.0, sugar: 1.2, spoon: 1.0, storm: 5.0, lift: 1.0, settle: 2.5 });
+const P = params({
+  waves: [1, 0, 1.6],      // how rough the sea in the cup is
+  flash: [1, 0, 1.5],      // how brightly the lightning lights the cup
+  tea: '#80421a',          // the colour of the tea once it settles
+});
+
+const LEVEL = 0.2, RIM = 0.33;
+const DROP = [2.0, 2.7];                         // the sugar falls, and lands
+const LAND = V(0.12, LEVEL, -0.04);              // where it lands
+const FROM = V(0.16, 0.72, -0.08);               // where it falls from, just out of sight above
+const HOME = Math.atan2(-0.112, -0.033), NEAR = 0.117;   // where the ship rides, at the back of the cup
+const HEAD = V(0.96, 0, -0.28);                  // the way its bow points, side on to you and into the current
+const STIR = { at: 3.8, a: 1.0, L: 4.4, b: 3.2, turns: 4 };   // the tea speeds up, turns steadily, then slows to a stop
+const SWELL = [[0, 0], [3.9, 0], [6.0, 1, 'io'], [9.2, 1], [11.9, 0, 'io']];
+const DIP = [[0, 0.75], [3.2, 0.75], [3.85, 0, 'out'], [9.2, 0], [10.1, 0.75, 'in']];   // how far the spoon is drawn back along its length
+const HAND = V(0.5, 0.78, -0.04);                  // where the unseen hand holds it, up and to the right
+const STRIKES = [[6.3, 0.1, 0.6, 0], [6.45, 0.18, 0.45, 0], [7.7, 0.1, 0.6, -0.24], [7.85, 0.16, 0.4, -0.24]];   // when, how long, how bright, how far along the back
+const ZIG = [0, 0.028, -0.018, 0.034, -0.012, 0.004];
+
+// How many times round the tea has turned, and how fast it is turning now (0 to 1)
+function stir(t) {
+  const { at, a, L, b, turns } = STIR, v = turns / (a / 3 + L + b / 3);
+  let x = t - at;
+  if (x <= 0) return [0, 0];
+  if (x < a) return [v * x ** 3 / (3 * a * a), (x / a) ** 2];
+  x -= a; const d1 = v * a / 3;
+  if (x < L) return [d1 + v * x, 1];
+  x -= L; const d2 = d1 + v * L;
+  if (x < b) return [d2 + v * b / 3 * (1 - (1 - x / b) ** 3), (1 - x / b) ** 2];
+  return [turns, 0];
+}
+// The same sea as the shader's, for the ship to ride
+function waves(x, z, amp, ph, sw, tw, vx, ring) {
+  const r = Math.hypot(x, z), a = -(sw + tw * (0.33 - r) / 0.33), c = Math.cos(a), s = Math.sin(a);
+  const kx = c * x - s * z, kz = s * x + c * z;
+  let h = amp * (0.026 * Math.sin(17 * kx + 9 * kz - ph[0]) + 0.014 * Math.sin(-8 * kx + 21 * kz - ph[1]) + 0.008 * Math.sin(29 * kx - 13 * kz - ph[2]));
+  h += vx * 0.55 * (x * x + z * z - 0.055);
+  const w = Math.hypot(x - ring.x, z - ring.y) - ring.z;
+  return h + ring.w * Math.cos(w * 30) * Math.exp(-w * w * 70);
+}
+const fallAt = t => FROM.clone().lerp(LAND, clamp((t - DROP[0]) / (DROP[1] - DROP[0]), 0, 1) ** 2);
+const spin = new THREE.Matrix4(), axis = V(1, 0.6, 0.3).normalize();
+
+function frame(now) {
+  if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
+  const t = S.written(now), round = S.round(now) * Math.PI * 2, U = uniforms;
+
+  // Where you are looking from: a slow drifting camera, once round the loop, that eases in a little as the storm builds
+  const yaw = 0.3 + 0.1 * Math.sin(round) + view.yaw, pitch = view.pitch + 0.035 * Math.sin(round + 0.8);
+  const push = key([[0, 0], [3.6, 0], [6.5, 1, 'io'], [9.5, 1], [12.2, 0, 'io']], t);
+  U.uSpan.value = baseSpan * (1 - 0.07 * push);
+  U.uTarget.value.set(0.025 * Math.sin(round + 1.6), 0.2 + 0.012 * Math.sin(2 * round) + 0.02 * push, 0.02 * Math.cos(round));
+  const fwd = U.uFwd.value.set(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const right = U.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  U.uUp.value.crossVectors(right, fwd);
+  // The light stays over your left shoulder
+  U.uLight.value.set(Math.sin(yaw) * 0.45, 0.8, Math.cos(yaw) * 0.45).addScaledVector(right, -0.5).normalize();
+
+  // The stirring turns the tea and hollows a whirl in it; the swells it raises are the storm
+  const [turns, speed] = stir(t), storm = key(SWELL, t), amp = storm * P.waves;
+  const sw = -2 * Math.PI * turns, tw = -1.2 * speed, vx = speed;
+  const ph = [9 * round, 7 * round, 12 * round];
+  U.uStorm.value = amp; U.uPh.value.set(...ph); U.uTeaMix.value = 1 - storm; U.uTea.value.set(P.tea).convertLinearToSRGB();
+  U.uSwirl.value = sw; U.uTwist.value = tw; U.uVortex.value = vx;
+  // The ring the sugar sends out
+  const since = t - DROP[1], ringAmp = since > 0 && since < 2.4 ? 0.022 * Math.exp(-since * 1.5) * Math.min(1, since / 0.08) : 0;
+  U.uRing.value.set(LAND.x, LAND.z, 0.02 + 0.5 * Math.max(since, 0), ringAmp);
+  U.uLip.value = 0.9 / Math.sqrt(1 + (amp * 1.06 * (1 + 1.2 * speed) + ringAmp * 32 + vx * 0.4) ** 2);
+
+  // The spoon is held by a hand up and to the right, out of the picture: it slides in along its own length, pivots
+  // about that hand as the bowl goes round close to the middle (so the handle sweeps a slanted cone, away from the ship),
+  // and slides back out the way it came while the tea still turns
+  const dip = key(DIP, t), sa = HOME + Math.PI + sw + tw * (0.33 - 0.07) / 0.33;
+  const reach = 0.07 + 0.012 * Math.sin(round * 5) * speed;   // a hand doesn't stir a perfect circle
+  const bowl = V(Math.cos(sa) * reach, LEVEL - 0.03, Math.sin(sa) * reach);
+  const lean = HAND.clone().sub(bowl).normalize();
+  U.uSpoonOn.value = dip < 0.74 ? 1 : 0;
+  U.uSpoonD.value.copy(lean);
+  const sd = V(-Math.sin(sa), 0, Math.cos(sa));
+  U.uSpoonS.value.copy(sd.addScaledVector(lean, -sd.dot(lean)).normalize());
+  U.uSpoonA.value.copy(bowl).addScaledVector(lean, dip);
+
+  // The ship holds its place at the back, bow into the current; the stirring drags it outward and to and fro
+  const ring = U.uRing.value, sea = (x, z) => waves(x, z, amp, ph, sw, tw, vx, ring);
+  const ang = HOME + storm * (0.35 * Math.sin(round * 3) + 0.15 * Math.sin(round * 5 + 1)), rad = NEAR + 0.075 * speed;
+  const sx = rad * Math.cos(ang), sz = rad * Math.sin(ang), e = 0.012;
+  const hx = (sea(sx + e, sz) - sea(sx - e, sz)) / (2 * e), hz = (sea(sx, sz + e) - sea(sx, sz - e)) / (2 * e);
+  U.uShipPos.value.set(sx, LEVEL + sea(sx, sz) + 0.008, sz);
+  let up = V(-hx * 1.2, 1, -hz * 1.2).normalize();
+  const yaw0 = ang - HOME + storm * 0.25 * Math.sin(round * 7);   // it swings with its place on the circle, and slews as it fights
+  const head = V(HEAD.x * Math.cos(yaw0) - HEAD.z * Math.sin(yaw0), 0, HEAD.x * Math.sin(yaw0) + HEAD.z * Math.cos(yaw0));
+  const f = head.addScaledVector(up, -head.dot(up)).normalize(), side = V().crossVectors(f, up);
+  U.uShip.value.set(f.x, f.y, f.z, up.x, up.y, up.z, side.x, side.y, side.z);
+
+  // Lightning in the thick of it: two strikes, each a double flick, the second further along the back
+  let flick = 0, shift = 0;
+  for (const [at, len, bright, dx] of STRIKES) { const k = bright * bump(t, at, len); if (k > flick) { flick = k; shift = dx; } }
+  U.uFlash.value = flick * P.flash; U.uBoltOn.value = flick > 0.2 ? 1 : 0;
+  // It forks from the very lip down the face of the far wall and on into the sea towards you, so it stays inside the cup
+  U.uBolt.value.forEach((b, i) => b.set(0.08 + shift - 0.04 * i / 5 + ZIG[i] * 1.1, RIM - 0.003 - (RIM - 0.003 - LEVEL + 0.01) * i / 5, -0.34 + 0.045 * i));
+
+  // The sugar: dropped in from above, a moment at the surface, then gone under
+  if (t > DROP[0] && t < DROP[1] + 0.3) {
+    const c = t < DROP[1] ? fallAt(t) : LAND.clone().setY(LEVEL - 0.09 * EASE.out((t - DROP[1]) / 0.3));
+    U.uSugar.value.set(c.x, c.y, c.z, 1);
+    spin.makeRotationAxis(axis, 3 * (Math.min(t, DROP[1]) - DROP[0])); U.uCube.value.setFromMatrix4(spin);
+    U.uTrailB.value.copy(U.uTrailA.value);
+  } else U.uSugar.value.w = 0;
+  // And the little splash it throws up
+  U.uDrops.value.forEach((d, i) => {
+    const s = since, ang = 0.4 + i * 1.3, out = i === 4 ? 0 : 0.2, vy = i === 4 ? 0.75 : 0.5 + 0.06 * i;
+    const y = LEVEL + vy * s - 3.2 * s * s;
+    if (s > 0 && y > LEVEL - 0.005) d.set(LAND.x + Math.cos(ang) * out * s, y, LAND.z + Math.sin(ang) * out * s, i === 4 ? 0.015 : 0.011);
+    else d.w = 0;
+  });
+
+  renderer.render(scene, camera);
+}
+loop(S, frame);
+</script>
+</body></html>

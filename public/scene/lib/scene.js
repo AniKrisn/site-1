@@ -63,7 +63,7 @@ let made = null;
 export function describe(parts) { made = parts; }
 
 let draw = null, span = () => null, last = null, told = 0, started = false;
-let now = Number(asked.get('t')) || 0, playing = !asked.has('paused');
+let now = Number(asked.get('t')) || 0, playing = !asked.has('paused'), rate = 1;
 const stage = () => document.querySelector('canvas');
 const at = () => { const whole = span(); return whole ? ((now % whole) + whole) % whole : now; };
 const render = dt => { try { draw(now, dt); } catch (e) { console.error(e?.stack ?? e); } };
@@ -71,8 +71,9 @@ const render = dt => { try { draw(now, dt); } catch (e) { console.error(e?.stack
 function tick(ms) {
   const dt = last === null ? 0 : Math.min(Math.max(ms / 1000 - last, 0), 0.05);
   last = ms / 1000;
-  if (playing) now += dt;
-  if (playing || !started) render(dt);
+  const step = dt * rate;
+  if (playing) now += step;
+  if (playing || !started) render(step);
   if (!started) {
     started = true;
     const s = stage();
@@ -113,6 +114,8 @@ function away(fn) {
 
 const ops = {
   seek({ t }) { now = t; render(0); say('tick', { t: at(), playing }); },
+  // How fast the clock runs while playing: 2 is twice as fast
+  rate({ by }) { rate = Math.min(Math.max(Number(by) || 1, 0.1), 8); },
   play({ on }) { playing = !!on; last = null; say('tick', { t: at(), playing }); },
   set({ name, value }) {
     if (!manifest[name] || !fits(manifest[name], value)) return false;
@@ -196,4 +199,7 @@ const redraw = () => {
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) addEventListener(type, redraw, { passive: true });
 // Keys pressed while the scene has the pointer still belong to the host
 addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === ' ') { e.preventDefault(); say('key', { key: e.key }); } });
-addEventListener('dblclick', () => say('dblclick'));
+// A press let go where it began, and soon, is a tap: the host steps back out on one. Anything longer or further is the scene being handled
+let pressed = null;
+addEventListener('pointerdown', e => { pressed = { x: e.clientX, y: e.clientY, at: performance.now() }; }, true);
+addEventListener('pointerup', e => { if (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) < 4 && performance.now() - pressed.at < 400) say('tap'); pressed = null; }, true);

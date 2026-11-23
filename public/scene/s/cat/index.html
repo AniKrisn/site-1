@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795375028875;window.__values={"turn":0.15,"earSize":0.9235,"eyeColour":"#29d8db","rightEar":0.7585,"tailSize":1.27};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0}</style><script>window.__version=1795457703028;window.__values={"turn":0,"earSize":0.9235,"eyeColour":"#29d8db","rightEar":0.9565,"tailSize":0.984,"bodySize":0.936};window.__offset=17;// Runs before the scene, so a scene that cannot even be read still says why
 (() => {
   const errors = window.__errors = [];
   const tell = () => parent !== window && parent.postMessage({ diorama: 'error', version: window.__version, errors: errors.slice(-6) }, '*');
@@ -50,7 +50,7 @@ uniform float uSpan, uBlink, uBreath;
 uniform mat3 uHead;
 uniform vec3 uTail[6];
 uniform vec2 uEar;
-uniform float uEarSize, uRightEar, uTailSize;
+uniform float uEarSize, uRightEar, uTailSize, uBodySize;
 uniform vec3 uEyeColour;
 
 // Black, and the few greys the light is allowed to pull out of it
@@ -83,7 +83,7 @@ float rod(vec3 p, vec3 a, vec3 b, float ra, float rb) {
 // Clumps and wisps: what makes the outline ragged
 float fur(vec3 p) { return (noise(p * vec3(11.0, 6.0, 11.0)) - 0.5) * 0.06 + (noise(p * vec3(21.0, 10.0, 21.0)) - 0.5) * 0.03; }
 
-vec3 toHead(vec3 p) { return uHead * (p - NECK) / BIG + PIVOT; }
+vec3 toHead(vec3 p) { return uHead * (p - NECK * uBodySize) / BIG + PIVOT; }   // the head rides on the neck wherever the body puts it
 
 // One ear, in a space squashed front to back; x is the ear itself, y the hollow scooped out of its front
 vec2 ear(vec3 q, float side) {
@@ -119,7 +119,7 @@ float bodyPart(vec3 p) {
   for (int i = 0; i < 5; i++) tail = min(tail, rod(p, uTail[i], uTail[i + 1], (0.058 - 0.003 * float(i)) * uTailSize, (0.055 - 0.003 * float(i)) * uTailSize));
   return smin(d, tail, 0.05) - fur(p);
 }
-float body(vec3 p) { return bodyPart(vec3(p.x, p.y / SQUAT, p.z)) * SQUAT; }
+float body(vec3 p) { vec3 b = p / uBodySize; return bodyPart(vec3(b.x, b.y / SQUAT, b.z)) * SQUAT * uBodySize; }   // grown about its feet
 float map(vec3 p) {
   vec3 hq = toHead(p), q = vec3(abs(hq.x), hq.yz);
   float d = smin(body(p), headPart(hq) * BIG, 0.05);
@@ -161,8 +161,8 @@ void main() {
   vec3 col = vec3(1.0);
 
   // Only rays that pass near the cat need walking
-  float reach = 0.95 + 0.55 * max(uTailSize - 1.0, 0.0);   // a longer tail needs a bigger ball
-  vec3 oc = ro - HEART; float b = dot(oc, rd), c = dot(oc, oc) - reach * reach, disc = b * b - c;
+  float reach = (0.95 + 0.55 * max(uTailSize - 1.0, 0.0)) * max(uBodySize, 1.0);   // a longer tail or bigger body needs a bigger ball
+  vec3 oc = ro - HEART * uBodySize; float b = dot(oc, rd), c = dot(oc, oc) - reach * reach, disc = b * b - c;
   float tFloor = -ro.y / rd.y, tHit = -1.0;
   if (disc > 0.0) {
     float t = -b - sqrt(disc), tEnd = min(-b + sqrt(disc), tFloor);
@@ -189,7 +189,7 @@ void main() {
   } else if (tFloor > 0.0) {
     // The page under it: only a shadow, fading to nothing
     vec3 g = ro + rd * tFloor;
-    float near = 1.0 - smoothstep(0.7, 1.45, length(g.xz - HEART.xz));
+    float near = 1.0 - smoothstep(0.7, 1.45, length(g.xz - HEART.xz * uBodySize) / max(uBodySize, 1.0));
     if (near > 0.0) {
       float under = 1.0 - clamp(map(g) / 0.16, 0.0, 1.0);
       col = floorTone(near * ((1.0 - lampAt(g + vec3(0.0, 0.012, 0.0))) * 0.42 + under * under * 0.5));
@@ -206,7 +206,7 @@ const uniforms = {
   uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
   uTarget: { value: new THREE.Vector3(0.1, 0.42, -0.1) }, uLight: { value: new THREE.Vector3() },
   uHead: { value: new THREE.Matrix3() }, uTail: { value: [] }, uEar: { value: new THREE.Vector2() },
-  uBlink: { value: 0 }, uBreath: { value: 0 }, uEarSize: { value: 1 }, uRightEar: { value: 1 }, uTailSize: { value: 1 }, uEyeColour: { value: new THREE.Color() },
+  uBlink: { value: 0 }, uBreath: { value: 0 }, uEarSize: { value: 1 }, uRightEar: { value: 1 }, uTailSize: { value: 1 }, uBodySize: { value: 1 }, uEyeColour: { value: new THREE.Color() },
 };
 // The tail at rest: out behind, then round to one side along the floor
 const TAIL = [[0, 0.1, -0.42], [0.2, 0.07, -0.56], [0.42, 0.06, -0.47], [0.56, 0.06, -0.27], [0.62, 0.06, -0.04], [0.6, 0.07, 0.18]];
@@ -254,7 +254,7 @@ addEventListener('pointercancel', release);
 document.documentElement.addEventListener('pointerleave', () => { pointer.active = false; });
 
 // Knobs the host can turn while it plays
-const P = params({ turn: [0.3, 0, 1.5], earSize: [1, 0.5, 1.6], eyeColour: '#d1d64d', rightEar: [1, 0.5, 1.6], tailSize: [1, 0.5, 1.6] });   // how fast the turntable goes round; how big the ears are; what colour the eyes are; the ear on the right as you face it, against the other; how long and thick the tail is
+const P = params({ turn: [0.3, 0, 1.5], earSize: [1, 0.5, 1.6], eyeColour: '#d1d64d', rightEar: [1, 0.5, 1.6], tailSize: [1, 0.5, 1.6], bodySize: [1, 0.6, 1.4] });   // how fast the turntable goes round; how big the ears are; what colour the eyes are; the ear on the right as you face it, against the other; how long and thick the tail is; how big the body is under the same head
 
 function frame(now, dt) {
   if (innerWidth !== sizedW || innerHeight !== sizedH) { sizedW = innerWidth; sizedH = innerHeight; resize(); }
@@ -270,7 +270,8 @@ function frame(now, dt) {
 
   // Is the pointer resting on its head?
   const span = U.uSpan.value, aspect = cols / rows;
-  crown.set(0, 0.24, 0.11).applyMatrix4(turn).add(PIVOT).sub(U.uTarget.value);
+  U.uBodySize.value = P.bodySize;
+  crown.set(0, 0.24, 0.11).applyMatrix4(turn).addScaledVector(PIVOT, P.bodySize).sub(U.uTarget.value);
   const onHead = pointer.active && Math.hypot(pointer.x * span * aspect - crown.dot(right), pointer.y * span - crown.dot(up)) < 0.2;
   cat.purr += ((onHead ? 1 : 0) - cat.purr) * toward(onHead ? 4 : 1.6, dt);
   cat.excite = clamp(cat.excite + pointer.stir * 1.6 - dt * 0.9, 0, 1);

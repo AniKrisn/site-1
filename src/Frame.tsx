@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import { attachDodgeText, detachDodgeText } from "./dodge";
+import { attachDodgeText, detachDodgeText, setObstacles } from "./dodge";
 import { drawRectD } from "./sketch";
 import { Landscape } from "./Landscape";
 import { Birds } from "./Birds";
@@ -9,6 +9,8 @@ import { Flow } from "./Flow";
 import { useWide } from "./wide";
 
 const STROKE_WIDTH = 4;
+/* More words than this in the tree's way and it bows out instead of parting them. */
+const CROWDED = 12;
 const ROUNDNESS = 24;
 
 /* A tldraw draw-style rectangle border: measures its own box and renders the
@@ -74,23 +76,34 @@ export function Frame() {
     let id = 0;
     const target = () =>
       card.querySelector<HTMLElement>("article, .sections");
-    /* Long posts reach down into the tree; rather than fight the text, the
-       tree bows out. */
+    /* Where a few words meet the tree they part round it: its crown is
+       handed to the word-dodging as a pile of circles, each as wide as the
+       ink at that height, read off the drawing itself. A long post that
+       runs right down into the tree is another matter: rather than push
+       whole paragraphs about, the tree bows out. */
     const updateTree = () => {
       const frame = frameRef.current;
-      const art = card.querySelector(".landscape-art");
+      const crown = card.querySelector<SVGPathElement>(".landscape-art .crown path");
       const t = target();
-      if (!frame || !art) return;
-      const a = art.getBoundingClientRect();
-      const sx = a.width / 1080;
-      const sy = a.height / 745;
-      // The crown as three circles (viewBox coords), same shape the drawing
-      // has; a grazing word or two doesn't count, a real collision does.
-      const circles = [
-        { x: a.left + 420 * sx, y: a.top + (375 - 300) * sy, r: 60 * sx },
-        { x: a.left + 390 * sx, y: a.top + (500 - 300) * sy, r: 100 * sx },
-        { x: a.left + 385 * sx, y: a.top + (650 - 300) * sy, r: 95 * sx },
-      ];
+      if (!frame || !crown) return;
+      const m = crown.getScreenCTM();
+      const length = crown.getTotalLength();
+      if (!m || !length) return;
+      const BAND = 12;
+      const bands = new Map<number, [number, number]>();
+      for (let i = 0; i <= 600; i++) {
+        const p = crown.getPointAtLength((length * i) / 600);
+        const x = m.a * p.x + m.c * p.y + m.e;
+        const y = m.b * p.x + m.d * p.y + m.f;
+        const k = Math.round(y / BAND);
+        const at = bands.get(k);
+        bands.set(k, at ? [Math.min(at[0], x), Math.max(at[1], x)] : [x, x]);
+      }
+      const circles = [...bands].map(([k, [left, right]]) => ({
+        x: (left + right) / 2,
+        y: k * BAND,
+        r: Math.max(4, (right - left) / 2),
+      }));
       let hits = 0;
       if (t) {
         for (const wEl of t.querySelectorAll(".dodge-word")) {
@@ -103,10 +116,11 @@ export function Frame() {
               break;
             }
           }
-          if (hits >= 4) break;
         }
       }
-      frame.classList.toggle("tree-hidden", hits >= 4);
+      const bowsOut = hits >= CROWDED;
+      frame.classList.toggle("tree-hidden", bowsOut);
+      setObstacles("tree", bowsOut ? [] : circles.map((c) => ({ ...c, hard: true })));
     };
     id = requestAnimationFrame(() => {
       const t = target();
@@ -118,6 +132,7 @@ export function Frame() {
       cancelAnimationFrame(id);
       window.removeEventListener("resize", updateTree);
       frameRef.current?.classList.remove("tree-hidden");
+      setObstacles("tree", []);
       detachDodgeText();
     };
   }, [location.pathname, wide]);
