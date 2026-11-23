@@ -21,6 +21,9 @@ export type SkyStart = (
   view: () => SkyView,
 ) => () => void;
 
+/* Off for now: the posts read better without their drawings. */
+const SHOWN = false;
+
 /* Pin a point of the canvas (fractions of its width) to a point of the
    landscape drawing (its viewBox units), instead of hanging in the sky. */
 export type TreeAnchor = { art: [number, number]; at: [number, number] };
@@ -103,5 +106,5 @@ export function SkyPiece({
       <canvas ref={canvasRef} />
     </div>
   );
-  return wide && scene ? createPortal(box, scene) : null;
+  return SHOWN && wide && scene ? createPortal(box, scene) : null;
 }
